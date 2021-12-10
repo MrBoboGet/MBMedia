@@ -1,0 +1,12 @@
+{
+	"PacketName":"MBMedia",
+	"Attributes":["Embeddable"],
+	"OutputConfigurations":["StaticDebug","StaticRelease"],
+	"OutputTargetNames": 
+        {
+		"StaticRelease": "MBMedia_SR",
+		"StaticDebug": "MBMedia_SD"
+	},
+	"Dependancies": []
+
+}

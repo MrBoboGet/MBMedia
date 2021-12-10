@@ -1,0 +1,5 @@
+/out/
+/MBPM_Builds/
+*.mp4
+*.mkv
+/.vs/

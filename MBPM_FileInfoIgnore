@@ -1,0 +1,5 @@
+Excludes:
+/.git/
+/.vs/
+/out/
+/CMakeSettings.json
