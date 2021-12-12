@@ -7,6 +7,7 @@
 #include "MBMedia.h"
 #include <iostream>
 #include <filesystem>
+#include <assert.h>
 ///*
 extern "C"
 {
@@ -224,6 +225,9 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 		{
 			AVPacket* OutputPacket = av_packet_alloc();
 			AVCodecContext* DecodeContextToUse = DecodeData->DecodeCodecContext[StreamIndex];
+			//TEST
+			//av_packet_rescale_ts(InputPacket,DecodeData->InputFormatContext.)
+			//
 			int response = avcodec_send_packet(DecodeContextToUse, InputPacket);
 			while (response >= 0) 
 			{
@@ -237,6 +241,15 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				{
 					return -1;
 				}
+				//TEST
+				int64_t PTSBefore = InputFrame->pts;
+				//std::cout << "Inputframe pts: " << InputFrame->pts << std::endl;
+				InputFrame->pts = av_frame_get_best_effort_timestamp(InputFrame);
+				assert(PTSBefore == InputFrame->pts);
+				//std::cout << "pts after get best effort "<<InputFrame->pts << std::endl;
+				//TEST
+				
+
 				//avcodec_send_frame(EncodeData->OutputFormatContext->streams[InputPacket->stream_index], InputFrame);
 				if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 				{
@@ -265,13 +278,16 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				}
 				if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
 				{
-				    OutputPacket->duration = OutStream->time_base.den / OutStream->time_base.num / InStream->avg_frame_rate.num * InStream->avg_frame_rate.den;
+					//std::cout << "InDuration" << InputPacket->duration << std::endl;
+				    //OutputPacket->duration =((OutStream->time_base.den / OutStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
+					//std::cout << "OutDuration" << OutputPacket->duration << std::endl;
 				}
 				OutputPacket->stream_index = StreamIndex;
 				//OutputPacket->duration = av_rescale_q(OutputPacket->duration, InStream->time_base, OutStream->time_base);
+				std::cout <<"Input Timestamp: "<< InputPacket->pts << std::endl;
 				av_packet_rescale_ts(OutputPacket, InStream->time_base, OutStream->time_base);
+				std::cout << "Output Timestamp: "<<OutputPacket->pts << std::endl;
 				response = FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
-				
 			}
 			h_Print_ffmpeg_Error(response);
 			av_packet_unref(OutputPacket);
