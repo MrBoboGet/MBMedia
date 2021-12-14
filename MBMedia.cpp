@@ -17,20 +17,20 @@ extern "C"
 namespace MBMedia
 {
 	
-	void h_Print_ffmpeg_Error(int ErrorCode)
+	void h_Print_ffmpeg_Error(int ReadFrameResponse)
 	{
-		if (ErrorCode >= 0)
+		if (ReadFrameResponse >= 0)
 		{
 			return;
 		}
 		char MessageBuffer[512];
-		av_strerror(ErrorCode, MessageBuffer, 512);
+		av_strerror(ReadFrameResponse, MessageBuffer, 512);
 		std::cout <<"FFMpeg error: "<< MessageBuffer << std::endl;
 	}
-    int FFMPEGCall(int ErrorCode)
+    int FFMPEGCall(int ReadFrameResponse)
 	{
-		h_Print_ffmpeg_Error(ErrorCode);
-		return(ErrorCode);
+		h_Print_ffmpeg_Error(ReadFrameResponse);
+		return(ReadFrameResponse);
 	}
 class MBDecodeContext
 {
@@ -52,6 +52,9 @@ public:
 			AVCodecParameters* NewInputCodecParamters = InputFormatContext->streams[i]->codecpar;
 			InputCodecParameters.push_back(NewInputCodecParamters);
 			AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
+			//TEST
+			//NewInputCodec->capabilities
+			//TEST
 			std::cout << NewInputCodec->name << std::endl;
 			InputCodecs.push_back(NewInputCodec);
 			//givet en codec och codec parameters så kan vi encoda/decoda data, men eftersom det är statefull kräver vi en encode/decode context
@@ -206,21 +209,37 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				OutputStream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 			}
 		}
-
+		if (EncodeData->OutputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
+		{
+			//OutputStream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+			EncodeData->OutputFormatContext->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+		}
 	}
 	avio_open(&EncodeData->OutputFormatContext->pb, EncodeData->OutFileName.c_str(), AVIO_FLAG_WRITE);
-	avformat_write_header(EncodeData->OutputFormatContext, NULL);
+	FFMPEGCall(avformat_write_header(EncodeData->OutputFormatContext, NULL));
 	AVFrame* InputFrame = av_frame_alloc();
 	AVPacket* InputPacket = av_packet_alloc();
 	AVStream* InStream = NULL;
 	AVStream* OutStream = NULL;
-	int ErrorCode = 0;
-	while (ErrorCode = av_read_frame(DecodeData->InputFormatContext, InputPacket) >= 0)
+	int ReadFrameResponse = 0;
+	while (ReadFrameResponse = av_read_frame(DecodeData->InputFormatContext, InputPacket) >= 0)
 	{
-		AVMediaType PacketMediaType = DecodeData->InputCodecParameters[InputPacket->stream_index]->codec_type;
 		int StreamIndex = InputPacket->stream_index;
-		InStream = DecodeData->InputFormatContext->streams[InputPacket->stream_index];
-		OutStream = EncodeData->OutputFormatContext->streams[InputPacket->stream_index];
+		//DEBUG
+		//if (ReadFrameResponse < 0)
+		//{
+		//	StreamIndex = 1;
+		//	InputPacket = NULL;
+		//}
+		//else
+		//{
+		//	StreamIndex = InputPacket->stream_index;
+		//}
+		//
+		AVMediaType PacketMediaType = DecodeData->InputCodecParameters[StreamIndex]->codec_type;
+		InStream = DecodeData->InputFormatContext->streams[StreamIndex];
+		OutStream = EncodeData->OutputFormatContext->streams[StreamIndex];
+		
 		if (PacketMediaType == AVMEDIA_TYPE_AUDIO || PacketMediaType == AVMEDIA_TYPE_VIDEO)
 		{
 			AVPacket* OutputPacket = av_packet_alloc();
@@ -228,16 +247,20 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 			//TEST
 			//av_packet_rescale_ts(InputPacket,DecodeData->InputFormatContext.)
 			//
-			int response = avcodec_send_packet(DecodeContextToUse, InputPacket);
-			while (response >= 0) 
+			int SendPacketResponse = FFMPEGCall(avcodec_send_packet(DecodeContextToUse, InputPacket));
+			while (SendPacketResponse >= 0)
 			{
-				response = avcodec_receive_frame(DecodeContextToUse, InputFrame);
-				if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) 
+				SendPacketResponse = avcodec_receive_frame(DecodeContextToUse, InputFrame);
+				if (SendPacketResponse == AVERROR(EAGAIN) || SendPacketResponse == AVERROR_EOF)
 				{
-					response = 0;
+					//SendPacketResponse = 0;
+					if (SendPacketResponse == AVERROR_EOF)
+					{
+						std::cout << "Hmmm, kanske behöver flusha?" << std::endl;
+					}
 					break;
 				}
-				else if (response < 0) 
+				else if (SendPacketResponse < 0)
 				{
 					return -1;
 				}
@@ -248,87 +271,84 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				assert(PTSBefore == InputFrame->pts);
 				//std::cout << "pts after get best effort "<<InputFrame->pts << std::endl;
 				//TEST
-				
+
 
 				//avcodec_send_frame(EncodeData->OutputFormatContext->streams[InputPacket->stream_index], InputFrame);
+				int SendFrameResponse = -1;
 				if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 				{
-					response =avcodec_send_frame(AudioEncodeContext,InputFrame);
-					if (response >= 0)
-					{
-					    response = avcodec_receive_packet(AudioEncodeContext, OutputPacket);
-					}
+					std::cout << InputFrame->pict_type << std::endl;
+					SendFrameResponse = FFMPEGCall(avcodec_send_frame(AudioEncodeContext, InputFrame));
 				}
 				else
 				{
-					response=avcodec_send_frame(VideoEncodeContext,InputFrame);
-					if (response >= 0)
+					//std::cout << InputFrame->pict_type << std::endl;
+					//InputFrame->pict_type = AV_PICTURE_TYPE_NONE;
+					//InputFrame->key_frame = true;
+					//std::cout << InputFrame->pict_type << std::endl;
+					SendFrameResponse = FFMPEGCall(avcodec_send_frame(VideoEncodeContext, InputFrame));
+				}
+				int DEBUG_PacketPerFrame = 0;
+				int RecievePacketResponse = 0;
+				while(RecievePacketResponse >= 0)
+				{
+					if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 					{
-					    response= avcodec_receive_packet(VideoEncodeContext, OutputPacket);
+						RecievePacketResponse = avcodec_receive_packet(AudioEncodeContext, OutputPacket);
 					}
+					else if(PacketMediaType == AVMEDIA_TYPE_VIDEO)
+					{
+						RecievePacketResponse = avcodec_receive_packet(VideoEncodeContext, OutputPacket);
+					}
+					if (RecievePacketResponse == AVERROR(EAGAIN) || RecievePacketResponse == AVERROR_EOF)
+					{
+						//RecievePacketResponse = 0;
+						if (RecievePacketResponse == AVERROR_EOF)
+						{
+							std::cout << "Hmmm, kanske behöver flusha?" << std::endl;
+						}
+						break;
+					}
+					else if (RecievePacketResponse < 0)
+					{
+						return -1;
+					}
+					if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
+					{
+						//std::cout << "InDuration" << InputPacket->duration << std::endl;
+						//OutputPacket->duration =((OutStream->time_base.den / OutStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
+						//std::cout << "OutDuration" << OutputPacket->duration << std::endl;
+						//std::cout << "BildData Som skrivs" << std::endl;
+					}
+					DEBUG_PacketPerFrame += 1;
+					OutputPacket->stream_index = StreamIndex;
+					//OutputPacket->duration = av_rescale_q(OutputPacket->duration, InStream->time_base, OutStream->time_base);
+					//std::cout << "Input Timestamp: " << InputPacket->pts << std::endl;
+					av_packet_rescale_ts(OutputPacket, InStream->time_base, OutStream->time_base);
+					if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
+					{
+						//std::cout << OutputPacket->pts << std::endl;
+						//OutputPacket->duration = 20;
+						//OutputPacket->pts = InputFrame->pts;
+					}
+					//std::cout << "Output Timestamp: " << OutputPacket->pts << std::endl;
+					FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
 				}
-				if (response == AVERROR(EAGAIN) || response == AVERROR_EOF)
+				if (DEBUG_PacketPerFrame > 1)
 				{
-					response = 0;
-					break;
+					std::cout << "PacketPerFrame > 1" << std::endl;
 				}
-				else if (response < 0)
-				{
-					return -1;
-				}
-				if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
-				{
-					//std::cout << "InDuration" << InputPacket->duration << std::endl;
-				    //OutputPacket->duration =((OutStream->time_base.den / OutStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
-					//std::cout << "OutDuration" << OutputPacket->duration << std::endl;
-				}
-				OutputPacket->stream_index = StreamIndex;
-				//OutputPacket->duration = av_rescale_q(OutputPacket->duration, InStream->time_base, OutStream->time_base);
-				std::cout <<"Input Timestamp: "<< InputPacket->pts << std::endl;
-				av_packet_rescale_ts(OutputPacket, InStream->time_base, OutStream->time_base);
-				std::cout << "Output Timestamp: "<<OutputPacket->pts << std::endl;
-				response = FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
 			}
-			h_Print_ffmpeg_Error(response);
+			//h_Print_ffmpeg_Error(response);
 			av_packet_unref(OutputPacket);
 			av_packet_free(&OutputPacket);
 		}
-		else
+		if (ReadFrameResponse < 0)
 		{
-			//tar bara och skriver in den direkt eftersom vi inte vill hålla på och 
-
-			InputPacket->pts = av_rescale_q_rnd(InputPacket->pts, InStream->time_base, OutStream->time_base, static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-			InputPacket->dts = av_rescale_q_rnd(InputPacket->dts, InStream->time_base, OutStream->time_base, static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-			InputPacket->duration = av_rescale_q(InputPacket->duration, InStream->time_base, OutStream->time_base);
-			InputPacket->pos = -1;
-			int ErrorCode = av_interleaved_write_frame(EncodeData->OutputFormatContext, InputPacket);
-			if (ErrorCode < 0)
-			{
-				std::cout << "Error demuxin packet" << std::endl;
-				break;
-			}
-			av_packet_unref(InputPacket);
+			break;
 		}
-		//InputPacket->
-		//int response = avcodec_send_packet(decoder_video_avcc, InputPacket);
-		//while (response >= 0) 
-		//{
-		//	response = avcodec_receive_frame(decoder_video_avcc, InputFrame);
-		//	if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) 
-		//	{
-		//		break;
-		//	}
-		//	else if (response < 0) {
-		//		return response;
-		//	}
-		//	if (response >= 0) {
-		//		encode(encoder_avfc, decoder_video_avs, encoder_video_avs, decoder_video_avcc, InputPacket->stream_index);
-		//	}
-		//	av_frame_unref(InputFrame);
-		//}
-		//av_packet_unref(InputPacket);
 	}
-	h_Print_ffmpeg_Error(ErrorCode);
+	h_Print_ffmpeg_Error(ReadFrameResponse);
     av_frame_unref(InputFrame);
 	av_write_trailer(EncodeData->OutputFormatContext);
 	return(MBError(false));
@@ -386,13 +406,13 @@ MBError Remux(std::string InputFilepath, std::string OutputFilepath)
 	}
 
 	//tror den bara kommer gissa output format pga filename
-	int ErrorCode = avio_open(&OutputFormatContext->pb, OutputFilepath.c_str(), AVIO_FLAG_WRITE);
-	if (ErrorCode < 0)
+	int ReadFrameResponse = avio_open(&OutputFormatContext->pb, OutputFilepath.c_str(), AVIO_FLAG_WRITE);
+	if (ReadFrameResponse < 0)
 	{
 		std::cout << "Error opening output file" << std::endl;
 	}
-	ErrorCode = avformat_write_header(OutputFormatContext, NULL);
-	if (ErrorCode < 0)
+	ReadFrameResponse = avformat_write_header(OutputFormatContext, NULL);
+	if (ReadFrameResponse < 0)
 	{
 		std::cout << "Error occurred when opening output file" << std::endl;
 	}
@@ -400,8 +420,8 @@ MBError Remux(std::string InputFilepath, std::string OutputFilepath)
 	AVPacket ReadPacket;
 	while (true)
 	{
-		ErrorCode = av_read_frame(InputFormatContext, &ReadPacket);
-		if (ErrorCode < 0)
+		ReadFrameResponse = av_read_frame(InputFormatContext, &ReadPacket);
+		if (ReadFrameResponse < 0)
 		{
 			//all data är inläst
 			break;
@@ -418,8 +438,8 @@ MBError Remux(std::string InputFilepath, std::string OutputFilepath)
 		ReadPacket.duration = av_rescale_q(ReadPacket.duration, InStream->time_base, OutStream->time_base);
 		ReadPacket.pos = -1;
 
-		ErrorCode = av_interleaved_write_frame(OutputFormatContext, &ReadPacket);
-		if (ErrorCode < 0)
+		ReadFrameResponse = av_interleaved_write_frame(OutputFormatContext, &ReadPacket);
+		if (ReadFrameResponse < 0)
 		{
 			std::cout << "Error demuxin packet" << std::endl;
 			break;

@@ -1,0 +1,24 @@
+Uppdelning av api't: 
+Demuxer/muxer: Givet en input data ström, ofta en fil, är det deras ansvar att läsa in meta datan från container formatet för att ta reda på bland annat vilka streams som finns. 
+Encoder/decoders: Deras ansvar är att ha den statefulla datan som krävs för att göra datan från encoding format specifika AVPackets till rå data, AVFrames. Givet en packet kan man få flera
+frames. Varje frame kan i sin tur skickas in i en encoder som omvandlar den till packets i sin tur. Värt att notera är att alla dem här stegen inte garanterar en 1 till 1 översättning mellan
+Packet -> frame eller frame -> packet, så för varje steg behöver man läsa all data från svaret. 
+
+
+Genom att ha manuellt ändrat med pts (presentation timestamp) kan jag bekrfäta att öka den kommer sträcka ut videon, samt att ljudet fortfarande fungerar. Detta får mig att tro att det inte är något fel
+på själva encoding, eller snarare mer specifikt, inget fel på timestamp konverteringen. Med 2 videor har jag testat, och båda ser mer eller mindre identiska ut till orginalet, förutom det att färgen
+är väldigt konstig, och konstiga artefakter. Det får mig att tänka att det kanske är något intermedieray format som kajkar? B eller P frames eller vad det heter? Kan det vara så att vi missar packets att skicka
+in, eller inte flushar allt?
+
+Har testat att få exempel från ffmpeg att fungera, men dem använder ett deprecated api...
+har testa med github grejen det här är ursprungligen baserat på, men transcoding exemplet han tar har buggar och fungerar inte...
+En grej jag kan testa är att skriva om allt igen, från början för att se om jag förstår. Problemet med det är väl bara att då är det allt som kan gå fel igen. Eventeullt testa med att bara encoda video 
+och se vad felet blir. Det är underligt, är så nära att vara korrekt men ändå är det något som går snett. Har i alla fall lyckats ta reda på kdoen som fuckade för innan, läsa dokumentationen för att se
+var felet kommer ifrån, så borde itne fara för långt ifrån att fixa det här med.
+
+testade att manuellt ändra input framens typ till av_picture_type till none, men det löste inte problemet. En grej jag kan testa att göra är att ändra den till opus eller något annat video format för att se
+om det fungerar, och kanske cross reference vad som händer. Jag vet garanterat i alla fall att den producerar I frames, 
+
+kan också vara att jag inte lägger in null framen för att flusha, har däremot relativt svårt att se hur det ska kunna påverka om vi antar att streamsen ändå skapas linjärt...
+
+Kan ockspå vart så att när jag ändrade att alla frames blev P frames så såg videon likadan ut, lite större, så kan vara problem ändå med hur frametyperna är?

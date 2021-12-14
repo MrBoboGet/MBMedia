@@ -106,6 +106,8 @@ endmacro()
 set(PROJECT_SOURCES 
 
 	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/FFMPEGDocExample_Transcode.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/leandromoreira_Transcode.cpp"
 )
 set(PROJECT_HEADERS 
 	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.h"
