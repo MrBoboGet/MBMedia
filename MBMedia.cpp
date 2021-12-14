@@ -277,12 +277,12 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				int SendFrameResponse = -1;
 				if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 				{
-					std::cout << InputFrame->pict_type << std::endl;
+					//std::cout << InputFrame->pict_type << std::endl;
 					SendFrameResponse = FFMPEGCall(avcodec_send_frame(AudioEncodeContext, InputFrame));
 				}
 				else
 				{
-					//std::cout << InputFrame->pict_type << std::endl;
+					std::cout << InputFrame->pict_type << std::endl;
 					//InputFrame->pict_type = AV_PICTURE_TYPE_NONE;
 					//InputFrame->key_frame = true;
 					//std::cout << InputFrame->pict_type << std::endl;
@@ -315,10 +315,17 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 					}
 					if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
 					{
+						//std::cout << InputFrame->pict_type << std::endl;
+						//std::cout << InputFrame->pict_type << std::endl;
+						//InputFrame->pict_type = AV_PICTURE_TYPE_I;
 						//std::cout << "InDuration" << InputPacket->duration << std::endl;
 						//OutputPacket->duration =((OutStream->time_base.den / OutStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
 						//std::cout << "OutDuration" << OutputPacket->duration << std::endl;
 						//std::cout << "BildData Som skrivs" << std::endl;
+					}
+					else
+					{
+						//std::cout << InputFrame->pict_type << std::endl;
 					}
 					DEBUG_PacketPerFrame += 1;
 					OutputPacket->stream_index = StreamIndex;
@@ -330,6 +337,11 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 						//std::cout << OutputPacket->pts << std::endl;
 						//OutputPacket->duration = 20;
 						//OutputPacket->pts = InputFrame->pts;
+						//if (InputFrame->pict_type != AV_PICTURE_TYPE_I)
+						//{
+						//	continue;
+						//}
+						continue;
 					}
 					//std::cout << "Output Timestamp: " << OutputPacket->pts << std::endl;
 					FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
