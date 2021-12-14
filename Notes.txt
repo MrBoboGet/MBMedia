@@ -22,3 +22,5 @@ om det fungerar, och kanske cross reference vad som händer. Jag vet garanterat i
 kan också vara att jag inte lägger in null framen för att flusha, har däremot relativt svårt att se hur det ska kunna påverka om vi antar att streamsen ändå skapas linjärt...
 
 Kan ockspå vart så att när jag ändrade att alla frames blev P frames så såg videon likadan ut, lite större, så kan vara problem ändå med hur frametyperna är?
+
+Testade att flusha allt, det verkar göra något, nu komer katten på slutet av Atm.webm med. Däremot har det fortfaradne inte löst problemet, videon, och ibland ljudet nu, är helt kajkat.

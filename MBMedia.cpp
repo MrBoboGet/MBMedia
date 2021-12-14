@@ -143,6 +143,17 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 	VideoEncodeContext->height = FirstVideoParameters->height;
 	VideoEncodeContext->width = FirstVideoParameters->width;
 	VideoEncodeContext->pix_fmt = VideoCodec->pix_fmts[0];
+
+	//DEBUG
+	std::vector<AVPixelFormat> PixelFormats;
+	size_t Offset = 0;
+	while (VideoCodec->pix_fmts[Offset] != -1)
+	{
+		PixelFormats.push_back(VideoCodec->pix_fmts[Offset]);
+		Offset += 1;
+	}
+	VideoEncodeContext->pix_fmt = PixelFormats.back();
+	//DEBUG
 	//control rate
 	VideoEncodeContext->bit_rate		= 2 * 1000 * 1000;
 	VideoEncodeContext->rc_buffer_size	= 4 * 1000 * 1000;
@@ -222,28 +233,62 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 	AVStream* InStream = NULL;
 	AVStream* OutStream = NULL;
 	int ReadFrameResponse = 0;
-	while (ReadFrameResponse = av_read_frame(DecodeData->InputFormatContext, InputPacket) >= 0)
+	int FlushedStreams = -1;
+	int Flushing = false;
+	int FlushCodex = false;
+	int FlushCodexIndex = -1;
+	while (true)
 	{
-		int StreamIndex = InputPacket->stream_index;
+		int StreamIndex;
+		if (!Flushing)
+		{
+			ReadFrameResponse = av_read_frame(DecodeData->InputFormatContext, InputPacket);
+			StreamIndex = InputPacket->stream_index;
+			if (ReadFrameResponse < 0)
+			{
+				Flushing = true;
+			}
+		}
 		//DEBUG
-		//if (ReadFrameResponse < 0)
-		//{
-		//	StreamIndex = 1;
-		//	InputPacket = NULL;
-		//}
-		//else
-		//{
-		//	StreamIndex = InputPacket->stream_index;
-		//}
+		if (Flushing)
+		{
+			FlushedStreams += 1;
+			StreamIndex = FlushedStreams;
+			if (FlushedStreams > 1)
+			{
+				FlushCodex = true;
+			}
+			InputPacket = NULL;
+		}
+		else
+		{
+			StreamIndex = InputPacket->stream_index;
+		}
+		if (FlushCodex)
+		{
+			FlushCodexIndex += 1;
+			StreamIndex = FlushCodexIndex;
+			if (FlushCodexIndex > 1)
+			{
+				break;
+			}
+		}
 		//
 		AVMediaType PacketMediaType = DecodeData->InputCodecParameters[StreamIndex]->codec_type;
 		InStream = DecodeData->InputFormatContext->streams[StreamIndex];
 		OutStream = EncodeData->OutputFormatContext->streams[StreamIndex];
 		
+
 		if (PacketMediaType == AVMEDIA_TYPE_AUDIO || PacketMediaType == AVMEDIA_TYPE_VIDEO)
 		{
 			AVPacket* OutputPacket = av_packet_alloc();
 			AVCodecContext* DecodeContextToUse = DecodeData->DecodeCodecContext[StreamIndex];
+		    if (FlushCodex)
+		    {
+			    InputFrame = NULL;
+			    goto FlushCodexLabel;
+		    }
+
 			//TEST
 			//av_packet_rescale_ts(InputPacket,DecodeData->InputFormatContext.)
 			//
@@ -274,6 +319,7 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 
 
 				//avcodec_send_frame(EncodeData->OutputFormatContext->streams[InputPacket->stream_index], InputFrame);
+FlushCodexLabel:
 				int SendFrameResponse = -1;
 				if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 				{
@@ -282,7 +328,7 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				}
 				else
 				{
-					std::cout << InputFrame->pict_type << std::endl;
+					//std::cout << InputFrame->pict_type << std::endl;
 					//InputFrame->pict_type = AV_PICTURE_TYPE_NONE;
 					//InputFrame->key_frame = true;
 					//std::cout << InputFrame->pict_type << std::endl;
@@ -341,7 +387,7 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 						//{
 						//	continue;
 						//}
-						continue;
+						//continue;
 					}
 					//std::cout << "Output Timestamp: " << OutputPacket->pts << std::endl;
 					FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
@@ -350,14 +396,18 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 				{
 					std::cout << "PacketPerFrame > 1" << std::endl;
 				}
+				if (FlushCodex)
+				{
+					break;
+				}
 			}
 			//h_Print_ffmpeg_Error(response);
 			av_packet_unref(OutputPacket);
 			av_packet_free(&OutputPacket);
-		}
-		if (ReadFrameResponse < 0)
-		{
-			break;
+			if (FlushCodex)
+			{
+				//break;
+			}
 		}
 	}
 	h_Print_ffmpeg_Error(ReadFrameResponse);
