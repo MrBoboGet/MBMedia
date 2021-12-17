@@ -24,3 +24,6 @@ kan också vara att jag inte lägger in null framen för att flusha, har däremot re
 Kan ockspå vart så att när jag ändrade att alla frames blev P frames så såg videon likadan ut, lite större, så kan vara problem ändå med hur frametyperna är?
 
 Testade att flusha allt, det verkar göra något, nu komer katten på slutet av Atm.webm med. Däremot har det fortfaradne inte löst problemet, videon, och ibland ljudet nu, är helt kajkat.
+
+
+hittade något options som hade med interlaced att göra, kanske var det som kajkade första grejen?
