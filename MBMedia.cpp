@@ -17,7 +17,7 @@ extern "C"
 namespace MBMedia
 {
 	
-	void h_Print_ffmpeg_Error(int ReadFrameResponse)
+	void _h_Print_ffmpeg_Error(int ReadFrameResponse)
 	{
 		if (ReadFrameResponse >= 0)
 		{
@@ -27,9 +27,9 @@ namespace MBMedia
 		av_strerror(ReadFrameResponse, MessageBuffer, 512);
 		std::cout <<"FFMpeg error: "<< MessageBuffer << std::endl;
 	}
-    int FFMPEGCall(int ReadFrameResponse)
+    int _FFMPEGCall(int ReadFrameResponse)
 	{
-		h_Print_ffmpeg_Error(ReadFrameResponse);
+		_h_Print_ffmpeg_Error(ReadFrameResponse);
 		return(ReadFrameResponse);
 	}
 class MBDecodeContext
@@ -44,9 +44,9 @@ public:
 		//transmux exempel
 		InputFormatContext = avformat_alloc_context();
 		//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
-		FFMPEGCall(avformat_open_input(&InputFormatContext, InputFilepath.c_str(), NULL, NULL));
+		_FFMPEGCall(avformat_open_input(&InputFormatContext, InputFilepath.c_str(), NULL, NULL));
 		//läsar in data om själva datastreamsen
-		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		_FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
 		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
 		{
 			AVCodecParameters* NewInputCodecParamters = InputFormatContext->streams[i]->codecpar;
@@ -59,9 +59,9 @@ public:
 			InputCodecs.push_back(NewInputCodec);
 			//givet en codec och codec parameters så kan vi encoda/decoda data, men eftersom det är statefull kräver vi en encode/decode context
 			AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
-			FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
+			_FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
 			//sedan måste vi öppna den, vet inte riktigt varför, initializerar den kanske?
-			FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
+			_FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
 			DecodeCodecContext.push_back(NewCodexContext);
 		}
 		//all data för att decoda insamlad
@@ -158,13 +158,13 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 	FirstVideoContext->bit_rate;
 	//FirstVideoContext->time_base;
 	VideoEncodeContext->bit_rate			= 2 * 1000 * 1000;
-	VideoEncodeContext->rc_buffer_size	= 4 * 1000 * 1000;
-	VideoEncodeContext->rc_max_rate		= 2 * 1000 * 10000;
-	VideoEncodeContext->rc_min_rate		= 2.5 * 1000 * 1000;
+	VideoEncodeContext->rc_buffer_size		= 4 * 1000 * 1000;
+	VideoEncodeContext->rc_max_rate			= 2 * 1000 * 10000;
+	VideoEncodeContext->rc_min_rate			= 2.5 * 1000 * 1000;
 	//timebase
 	//testar för enkelhetens och vetenskapens skull att bara kopiera över alla data
 	VideoEncodeContext->time_base = av_inv_q(input_framerate);
-
+	AVRational AudioFrameRate = av_guess_frame_rate(DecodeData->InputFormatContext, DecodeData->InputFormatContext->streams[1], NULL);
 	int FirstAudioIndex = -1;
 	for (size_t i = 0; i < DecodeData->InputCodecParameters.size(); i++)
 	{
@@ -179,21 +179,21 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 	//AudioEncodeContext->width = FirstAudioContext->width;
 	//AudioEncodeContext->pix_fmt = AudioCodec->pix_fmts[0];
 	//control rate
-	AudioEncodeContext->bit_rate		= 2 * 1000 * 1000;
-	AudioEncodeContext->rc_buffer_size	= 4 * 1000 * 1000;
-	AudioEncodeContext->rc_max_rate		= 2 * 1000 * 10000;
-	AudioEncodeContext->rc_min_rate		= 2.5 * 1000 * 1000;
+	AudioEncodeContext->bit_rate		= 2 * 1000 * 10000;
+	AudioEncodeContext->rc_buffer_size	= 4 * 1000 * 10000;
+	AudioEncodeContext->rc_max_rate		= 2 * 10000 * 100000;
+	AudioEncodeContext->rc_min_rate		= 2.5 * 100 * 100;
 	//timebase
 	//testar för enkelhetens och vetenskapens skull att bara kopiera över alla data
-	AudioEncodeContext->time_base = FirstAudioContext->time_base;
+	AudioEncodeContext->time_base = DecodeData->InputFormatContext->streams[1]->time_base;
 	AudioEncodeContext->sample_fmt = AudioCodec->sample_fmts[0];
 	AudioEncodeContext->channels = FirstAudioContext->channels;
 	AudioEncodeContext->channel_layout = FirstAudioContext->channel_layout;
 	//sample rate vad det nu betyder wtf
 	AudioEncodeContext->sample_rate = FirstAudioContext->sample_rate;
 	//nu har vi två förhoppningsvis fungerande decoders för ljud, då är det bara att faktiskt encoda våran frame
-	avcodec_open2(VideoEncodeContext, VideoCodec, NULL);
-	avcodec_open2(AudioEncodeContext, AudioCodec, NULL);
+	_FFMPEGCall(avcodec_open2(VideoEncodeContext, VideoCodec, NULL));
+	_FFMPEGCall(avcodec_open2(AudioEncodeContext, AudioCodec, NULL));
 	//AudioEncodeContext
 	std::vector<AVSampleFormat> SupportedSampleFormats;
 	Offset = 0;
@@ -213,15 +213,15 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 		//ser till att streamsen har rätt codex data som vi vill byta till
 		if (InputStream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
 		{
-			FFMPEGCall(avcodec_parameters_from_context(OutputStream->codecpar, VideoEncodeContext));
+			_FFMPEGCall(avcodec_parameters_from_context(OutputStream->codecpar, VideoEncodeContext));
 		}
 		else if (InputStream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
 		{
-			FFMPEGCall(avcodec_parameters_from_context(OutputStream->codecpar, AudioEncodeContext));
+			_FFMPEGCall(avcodec_parameters_from_context(OutputStream->codecpar, AudioEncodeContext));
 		}
 		else
 		{
-			FFMPEGCall(avcodec_parameters_copy(OutputStream->codecpar, DecodeData->InputCodecParameters[i]));
+			_FFMPEGCall(avcodec_parameters_copy(OutputStream->codecpar, DecodeData->InputCodecParameters[i]));
 			//ser till att streamen tar global headers om format contexten gör det
 			if (EncodeData->OutputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
 			{
@@ -235,7 +235,7 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 		}
 	}
 	avio_open(&EncodeData->OutputFormatContext->pb, EncodeData->OutFileName.c_str(), AVIO_FLAG_WRITE);
-	FFMPEGCall(avformat_write_header(EncodeData->OutputFormatContext, NULL));
+	_FFMPEGCall(avformat_write_header(EncodeData->OutputFormatContext, NULL));
 	AVFrame* InputFrame = av_frame_alloc();
 	AVPacket* InputPacket = av_packet_alloc();
 	AVStream* InStream = NULL;
@@ -300,7 +300,7 @@ MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeDa
 			//TEST
 			//av_packet_rescale_ts(InputPacket,DecodeData->InputFormatContext.)
 			//
-			int SendPacketResponse = FFMPEGCall(avcodec_send_packet(DecodeContextToUse, InputPacket));
+			int SendPacketResponse = _FFMPEGCall(avcodec_send_packet(DecodeContextToUse, InputPacket));
 			while (SendPacketResponse >= 0)
 			{
 				SendPacketResponse = avcodec_receive_frame(DecodeContextToUse, InputFrame);
@@ -332,7 +332,7 @@ FlushCodexLabel:
 				if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 				{
 					//std::cout << InputFrame->pict_type << std::endl;
-					SendFrameResponse = FFMPEGCall(avcodec_send_frame(AudioEncodeContext, InputFrame));
+					SendFrameResponse = _FFMPEGCall(avcodec_send_frame(AudioEncodeContext, InputFrame));
 				}
 				else
 				{
@@ -340,7 +340,7 @@ FlushCodexLabel:
 					//InputFrame->pict_type = AV_PICTURE_TYPE_NONE;
 					//InputFrame->key_frame = true;
 					//std::cout << InputFrame->pict_type << std::endl;
-					SendFrameResponse = FFMPEGCall(avcodec_send_frame(VideoEncodeContext, InputFrame));
+					SendFrameResponse = _FFMPEGCall(avcodec_send_frame(VideoEncodeContext, InputFrame));
 				}
 				int DEBUG_PacketPerFrame = 0;
 				int RecievePacketResponse = 0;
@@ -373,7 +373,7 @@ FlushCodexLabel:
 						//std::cout << InputFrame->pict_type << std::endl;
 						//InputFrame->pict_type = AV_PICTURE_TYPE_I;
 						//std::cout << "InDuration" << InputPacket->duration << std::endl;
-						OutputPacket->duration =((InStream->time_base.den / InStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
+						//OutputPacket->duration =((InStream->time_base.den / InStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
 						//std::cout << "OutDuration" << OutputPacket->duration << std::endl;
 						//std::cout << "BildData Som skrivs" << std::endl;
 					}
@@ -391,8 +391,9 @@ FlushCodexLabel:
 
 					//OutputPacket->duration = av_rescale_q(OutputPacket->duration, InStream->time_base, OutStream->time_base);
 					//std::cout << "Input Timestamp: " << InputPacket->pts << std::endl;
+					OutputPacket->duration = 0;
 					av_packet_rescale_ts(OutputPacket, InStream->time_base, OutStream->time_base);
-					if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
+					if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
 					{
 						//std::cout << OutputPacket->pts << std::endl;
 						//OutputPacket->duration = 20;
@@ -404,8 +405,8 @@ FlushCodexLabel:
 						//continue;
 						std::cout << "Current packet time: " << OutputPacket->pts * (double(OutStream->time_base.num) / OutStream->time_base.den)<<"\n";
 					}
+					_FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
 					//std::cout << "Output Timestamp: " << OutputPacket->pts << std::endl;
-					FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
 				}
 				if (DEBUG_PacketPerFrame > 1)
 				{
@@ -425,7 +426,7 @@ FlushCodexLabel:
 			}
 		}
 	}
-	h_Print_ffmpeg_Error(ReadFrameResponse);
+	_h_Print_ffmpeg_Error(ReadFrameResponse);
     av_frame_unref(InputFrame);
 	av_write_trailer(EncodeData->OutputFormatContext);
 	return(MBError(false));

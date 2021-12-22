@@ -1,4 +1,5 @@
 #include "MBMedia.h"
+#include "MBMedia2.h"
 #include <filesystem>
 #include <iostream>
 extern "C"
@@ -11,6 +12,7 @@ int main()
 	avcodec_register_all();
 //	return 0;
 	std::filesystem::current_path(std::filesystem::current_path().parent_path());
-	MBMedia::Transcode("./SonicSpeedruning.mkv", "./SonicSpeedruning.mp4", MBMedia::MBVideoCodecs::H264, MBMedia::MBAudioCodecs::AAC);
+	//MBMedia::Transcode("./SonicSpeedruning.mkv", "./SonicSpeedruning.mp4", MBMedia::MBVideoCodecs::H264, MBMedia::MBAudioCodecs::AAC);
+	MBMedia::Transcode("./SonicSpeedruning.mkv", "./SonicSpeedruning2.mp4", MBMedia::Codec::AAC, MBMedia::Codec::H264);
 	return(0);
 }

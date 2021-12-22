@@ -27,3 +27,5 @@ Testade att flusha allt, det verkar göra något, nu komer katten på slutet av Atm
 
 
 hittade något options som hade med interlaced att göra, kanske var det som kajkade första grejen?
+En anna grej, kan det vara så att timebas konverteranadet är konstigt? Borde det kanske vara från codec timebas till stream timebas snarare än från InputStream timebas till OutputStream timbas? Encodingen
+kanske om jag har förstått resten rätt inte beror på timebasen den kom ifrån.
