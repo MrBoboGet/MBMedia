@@ -13,6 +13,6 @@ int main()
 //	return 0;
 	std::filesystem::current_path(std::filesystem::current_path().parent_path());
 	//MBMedia::Transcode("./SonicSpeedruning.mkv", "./SonicSpeedruning.mp4", MBMedia::MBVideoCodecs::H264, MBMedia::MBAudioCodecs::AAC);
-	MBMedia::Transcode("./SonicSpeedruning.mkv", "./SonicSpeedruning2.mp4", MBMedia::Codec::AAC, MBMedia::Codec::H264);
+	MBMedia::Transcode("./TheCap.mp4", "./TheCap.mkv", MBMedia::Codec::AAC, MBMedia::Codec::H264);
 	return(0);
 }

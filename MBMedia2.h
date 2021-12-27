@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <cstdint>
 #include <stdint.h>
+#include <queue>
 ///*
 namespace MBMedia
 {
@@ -49,16 +50,14 @@ namespace MBMedia
 
 		Null,
 	};
+	enum class ChannelLayout : int64_t
+	{
+
+		Null
+	};
 	struct AudioParameters
 	{
-		friend class FrameConverter;
-		friend class StreamDecoder;
-		friend class StreamEncoder;
-		
-		
-		
-		size_t m_ChannelLayout = -1;
-	private:
+		ChannelLayout Layout = ChannelLayout::Null;
 		SampleFormat AudioFormat = SampleFormat::Null;
 		size_t SampleRate = -1;
 		size_t NumberOfChannels = -1;
@@ -170,7 +169,7 @@ namespace MBMedia
 	private:
 		friend class StreamDecoder;
 		friend class StreamEncoder;
-		friend class FrameConverter;
+		friend class AudioConverter;
 		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
 		MediaType m_MediaType = MediaType::Null;
 		TimeBase m_TimeBase;
@@ -180,34 +179,59 @@ namespace MBMedia
 		TimeBase GetTimeBase()const {return(m_TimeBase);};
 		MediaType GetMediaType() const { return(m_MediaType); };
 	};
-
+	class AudioConverter
+	{
+	private:
+		friend void swap(AudioConverter& LeftConverter, AudioConverter& RightConverter);
+		std::queue<StreamFrame> m_StoredFrames = {};
+		std::unique_ptr<void, void (*)(void*)> m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
+		std::unique_ptr<void, void (*)(void*)> m_AudioDataBuffer = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
+		AudioParameters m_NewAudioParameters;
+		AudioParameters m_OldAudioParameters;
+		TimeBase m_InputTimebase;
+		//DEBUG
+		//ANTAGANDE varje input timestamp har monotont växande pts
+		int64_t DEBUG_LastTimestamp = 0;
+		//DEBUG
+		int64_t m_CurrentTimestamp = 0;
+		bool m_FirstTimestampSet = false;
+		bool m_Flushed = false;
+		void p_ConvertNewFrame();
+		void p_FlushBufferedFrames();
+	public:
+		AudioConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters);
+		void InsertFrame(StreamFrame const& FrameToInsert);
+		StreamFrame GetNextFrame();
+		void Flush();
+	};
 	class FrameConverter
 	{
 	private:
-		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
-		AudioParameters m_NewAudioParameters;
-		MediaType m_Type = MediaType::Null;
+		friend void swap(FrameConverter& LeftConverter, FrameConverter& RightConverter);
+		std::unique_ptr<AudioConverter> m_AudioConverter = nullptr;
 		bool m_Flushed = false;
+		MediaType m_Type = MediaType::Audio;
+		
 	public:
 		FrameConverter() {};
 
-		FrameConverter(FrameConverter&&) = default;
-		FrameConverter& operator=(FrameConverter&&) = default;
+		FrameConverter(FrameConverter&&) noexcept;
+		FrameConverter& operator=(FrameConverter&&) noexcept;
 
 		FrameConverter(FrameConverter const&) = delete;
 		FrameConverter& operator=(FrameConverter const&) = delete;
 
 		bool IsInitialised();
 
-		FrameConverter(AudioParameters const& OldParameters,AudioParameters const& NewParameters);
-		FrameConverter(VideoParameters const& OldParameters, AudioParameters const& NewParameters);
-		//void Flush();
-		//void InsertFrame(StreamFrame& FrameToInsert);
-		//StreamFrame GetNextFrame();
+		FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters,AudioParameters const& NewParameters);
+		FrameConverter(TimeBase InputTimebase,VideoParameters const& OldParameters, AudioParameters const& NewParameters);
+		void Flush();
+		void InsertFrame(StreamFrame const& FrameToInsert);
+		StreamFrame GetNextFrame();
 
 		//SwrContext converting and storing at the same time motivated this interface, even tough it isn't consistent with the rest.
 		//Passing nullptr flushes and returns the stored records untill the media type is null
-		StreamFrame ConvertFrame(const StreamFrame* FrameToConvert);
+		//StreamFrame ConvertFrame(const StreamFrame* FrameToConvert);
 		//Because freeing a swrcontext before it is flushed we put this destructor here temporarily for debugging purposes
 		~FrameConverter()
 		{
@@ -232,7 +256,7 @@ namespace MBMedia
 
 		bool m_DecodeStreamFinished = false;
 		bool m_Flushing = false;
-
+		uint64_t m_CurrentPts = -1;
 		StreamFrame p_GetDecodedFrame();
 		FrameConverter m_FrameConverter;
 	public:
