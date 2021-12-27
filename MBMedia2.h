@@ -32,6 +32,52 @@ namespace MBMedia
 		int num = 0;
 		int den = 0;
 	};
+	enum class SampleFormat
+	{
+		NONE = -1,
+		U8,   
+		S16,  
+		S32,  
+		FLT,  
+		DBL,  
+	
+		U8P,  
+		S16P, 
+		S32P, 
+		FLTP, 
+		DBLP, 
+
+		Null,
+	};
+	struct AudioParameters
+	{
+		friend class FrameConverter;
+		friend class StreamDecoder;
+		friend class StreamEncoder;
+		
+		
+		
+		size_t m_ChannelLayout = -1;
+	private:
+		SampleFormat AudioFormat = SampleFormat::Null;
+		size_t SampleRate = -1;
+		size_t NumberOfChannels = -1;
+		size_t FrameSize = -1;
+	};
+	enum class VideoFormat
+	{
+
+	};
+	struct VideoParameters
+	{
+
+	};
+	//class StreamDecoder;
+	//class StreamEncoder;
+	//AudioFormatParameters GetAudioParameters(StreamDecoder const&);
+	//VideoFormatParameters GetVideoParameters(StreamDecoder const&);
+	//AudioFormatParameters GetAudioParameters(StreamEncoder const&);
+	//VideoFormatParameters GetVideoParameters(StreamEncoder const&);
 	//har inte hittat entry pointen till free_steam, så gör något lite hacky med att låta streamen vara helt kopplad till format kontexten
 	void _FreeFormatContext(void* DataToFree);
 	struct StreamInfo
@@ -124,13 +170,52 @@ namespace MBMedia
 	private:
 		friend class StreamDecoder;
 		friend class StreamEncoder;
+		friend class FrameConverter;
 		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
 		MediaType m_MediaType = MediaType::Null;
 		TimeBase m_TimeBase;
 		StreamFrame(void* FFMPEGData,TimeBase FrameTimeBase,MediaType FrameType);
 	public:
+		StreamFrame();
 		TimeBase GetTimeBase()const {return(m_TimeBase);};
-		MediaType GetMediaType() { return(m_MediaType); };
+		MediaType GetMediaType() const { return(m_MediaType); };
+	};
+
+	class FrameConverter
+	{
+	private:
+		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
+		AudioParameters m_NewAudioParameters;
+		MediaType m_Type = MediaType::Null;
+		bool m_Flushed = false;
+	public:
+		FrameConverter() {};
+
+		FrameConverter(FrameConverter&&) = default;
+		FrameConverter& operator=(FrameConverter&&) = default;
+
+		FrameConverter(FrameConverter const&) = delete;
+		FrameConverter& operator=(FrameConverter const&) = delete;
+
+		bool IsInitialised();
+
+		FrameConverter(AudioParameters const& OldParameters,AudioParameters const& NewParameters);
+		FrameConverter(VideoParameters const& OldParameters, AudioParameters const& NewParameters);
+		//void Flush();
+		//void InsertFrame(StreamFrame& FrameToInsert);
+		//StreamFrame GetNextFrame();
+
+		//SwrContext converting and storing at the same time motivated this interface, even tough it isn't consistent with the rest.
+		//Passing nullptr flushes and returns the stored records untill the media type is null
+		StreamFrame ConvertFrame(const StreamFrame* FrameToConvert);
+		//Because freeing a swrcontext before it is flushed we put this destructor here temporarily for debugging purposes
+		~FrameConverter()
+		{
+			if (!m_Flushed && IsInitialised())
+			{
+				throw std::exception();
+			}
+		}
 	};
 
 	void _FreeCodecContext(void*);
@@ -138,13 +223,23 @@ namespace MBMedia
 	{
 	private:
 		//void p_Flush();
-		friend 	AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy);
+		friend AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy);
 		friend VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy);
 		std::shared_ptr<void> m_InternalData = nullptr;
 		MediaType m_Type = MediaType::Null;
 		TimeBase m_CodecTimebase;
 		TimeBase m_StreamTimebase;
+
+		bool m_DecodeStreamFinished = false;
+		bool m_Flushing = false;
+
+		StreamFrame p_GetDecodedFrame();
+		FrameConverter m_FrameConverter;
 	public:
+		void SetAudioConversionParameters(AudioParameters const& ParametersToConvertTo);
+		AudioParameters GetAudioParameters() const;
+		VideoParameters GetVideoParameters() const;
+
 		TimeBase GetCodecTimebase() const { return(m_CodecTimebase); };
 		TimeBase GetStreamTimebase() const { return(m_CodecTimebase); };
 		StreamDecoder(StreamDecoder const&) = delete;
@@ -158,6 +253,7 @@ namespace MBMedia
 		void Flush();
 		//~StreamDecoder();
 	};
+
 	class StreamEncoder
 	{
 	private:
@@ -174,6 +270,9 @@ namespace MBMedia
 
 		StreamEncoder(Codec StreamType, AudioEncodeInfo const& EncodeInfo);
 		StreamEncoder(Codec StreamType, VideoEncodeInfo const& EncodeInfo);
+
+		AudioParameters GetAudioParameters() const;
+		VideoParameters GetVideoParameters() const;
 
 		void InsertFrame(StreamFrame const& FrameToEncode);
 		void Flush();
