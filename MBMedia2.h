@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <stdint.h>
 #include <queue>
+#include "PixelFormats.h"
 ///*
 namespace MBMedia
 {
@@ -63,13 +64,15 @@ namespace MBMedia
 		size_t NumberOfChannels = -1;
 		size_t FrameSize = -1;
 	};
-	enum class VideoFormat
-	{
-
-	};
+	//enum class VideoFormat
+	//{
+	//	Null
+	//};
 	struct VideoParameters
 	{
-
+		VideoFormat Format = VideoFormat::Null;
+		int Width = 0;
+		int Height = 0;
 	};
 	//class StreamDecoder;
 	//class StreamEncoder;
@@ -170,6 +173,7 @@ namespace MBMedia
 		friend class StreamDecoder;
 		friend class StreamEncoder;
 		friend class AudioConverter;
+		friend class VideoConverter;
 		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
 		MediaType m_MediaType = MediaType::Null;
 		TimeBase m_TimeBase;
@@ -204,13 +208,29 @@ namespace MBMedia
 		StreamFrame GetNextFrame();
 		void Flush();
 	};
+	class VideoConverter
+	{
+	private:
+		friend void swap(VideoConverter& LeftConverter, VideoConverter& RightConverter);
+		std::queue<StreamFrame> m_StoredFrames = {};
+		std::unique_ptr<void, void (*)(void*)> m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
+		VideoParameters m_NewVideoParameters;
+		VideoParameters m_OldVideoParameters;
+		TimeBase m_InputTimebase;
+	public:
+		VideoConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters);
+		void InsertFrame(StreamFrame const& FrameToInsert);
+		StreamFrame GetNextFrame();
+		void Flush();
+	};
 	class FrameConverter
 	{
 	private:
 		friend void swap(FrameConverter& LeftConverter, FrameConverter& RightConverter);
 		std::unique_ptr<AudioConverter> m_AudioConverter = nullptr;
+		std::unique_ptr<VideoConverter> m_VideoConverter = nullptr;
 		bool m_Flushed = false;
-		MediaType m_Type = MediaType::Audio;
+		MediaType m_Type = MediaType::Null;
 		
 	public:
 		FrameConverter() {};
@@ -224,7 +244,7 @@ namespace MBMedia
 		bool IsInitialised();
 
 		FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters,AudioParameters const& NewParameters);
-		FrameConverter(TimeBase InputTimebase,VideoParameters const& OldParameters, AudioParameters const& NewParameters);
+		FrameConverter(TimeBase InputTimebase,VideoParameters const& OldParameters, VideoParameters const& NewParameters);
 		void Flush();
 		void InsertFrame(StreamFrame const& FrameToInsert);
 		StreamFrame GetNextFrame();
@@ -261,6 +281,7 @@ namespace MBMedia
 		FrameConverter m_FrameConverter;
 	public:
 		void SetAudioConversionParameters(AudioParameters const& ParametersToConvertTo);
+		void SetVideoConversionParameters(VideoParameters const& ParametersToConvertTo);
 		AudioParameters GetAudioParameters() const;
 		VideoParameters GetVideoParameters() const;
 

@@ -13,6 +13,7 @@ extern "C"
 #include <ffmpeg/libavcodec/avcodec.h>
 #include <ffmpeg/libavformat/avformat.h>
 #include <ffmpeg/libswresample/swresample.h>
+#include <ffmpeg/libswscale/swscale.h>
 #include <ffmpeg/libavutil/audio_fifo.h>
 //#include <ffmpeg/libavutil/>
 }
@@ -104,6 +105,66 @@ namespace MBMedia
 	ChannelLayout h_FFMPEGLayoutToMBLayout(int64_t LayoutToConvert)
 	{
 		return(ChannelLayout(LayoutToConvert));
+	}
+	VideoFormat h_FFMPEGVideoFormatToMBVideoFormat(AVPixelFormat FormatToConvert);
+	AVPixelFormat h_MBVideoFormatToFFMPEGVideoFormat(VideoFormat FormatToConvert)
+	{
+		AVPixelFormat ReturnValue = AVPixelFormat::AV_PIX_FMT_NONE;
+		int64_t MB_VAAPI = (uint64_t)VideoFormat::AV_PIX_FMT_VAAPI;
+		int64_t FFMPEG_VAAPI = (uint64_t)AVPixelFormat::AV_PIX_FMT_VAAPI;
+		if (MB_VAAPI == FFMPEG_VAAPI)
+		{
+			ReturnValue = AVPixelFormat(FormatToConvert);
+		}
+		else
+		{
+			int64_t Lowest_VAAPI = MB_VAAPI < FFMPEG_VAAPI ? MB_VAAPI : FFMPEG_VAAPI;
+			int64_t VAAPI_Distance = std::abs(MB_VAAPI - FFMPEG_VAAPI);
+			int64_t FormatToConvertDistance = int64_t(FormatToConvert) - Lowest_VAAPI;
+			if (FormatToConvertDistance <= VAAPI_Distance && FormatToConvertDistance >= 0)
+			{
+				throw std::exception();
+			}
+			if (FormatToConvertDistance < 0)
+			{
+				ReturnValue = AVPixelFormat(int64_t(FormatToConvert));
+			}
+			else
+			{
+				ReturnValue = MB_VAAPI < FFMPEG_VAAPI ? AVPixelFormat(int64_t(FormatToConvert) + VAAPI_Distance) : AVPixelFormat(int64_t(FormatToConvert) - VAAPI_Distance);
+			}
+		}
+		assert(h_FFMPEGVideoFormatToMBVideoFormat(ReturnValue) == FormatToConvert);
+		return(ReturnValue);
+	}
+	VideoFormat h_FFMPEGVideoFormatToMBVideoFormat(AVPixelFormat FormatToConvert)
+	{
+		VideoFormat ReturnValue = VideoFormat::Null;
+		int64_t MB_VAAPI = (uint64_t)VideoFormat::AV_PIX_FMT_VAAPI;
+		int64_t FFMPEG_VAAPI = (uint64_t)AVPixelFormat::AV_PIX_FMT_VAAPI;
+		if (MB_VAAPI == FFMPEG_VAAPI)
+		{
+			ReturnValue = VideoFormat(FormatToConvert);
+		}
+		else
+		{
+			int64_t Lowest_VAAPI = MB_VAAPI < FFMPEG_VAAPI ? MB_VAAPI : FFMPEG_VAAPI;
+			int64_t VAAPI_Distance = std::abs(MB_VAAPI - FFMPEG_VAAPI);
+			int64_t FormatToConvertDistance = int64_t(FormatToConvert) - Lowest_VAAPI;
+			if (FormatToConvertDistance <= VAAPI_Distance && FormatToConvertDistance >= 0)
+			{
+				throw std::exception();
+			}
+			if (FormatToConvertDistance < 0)
+			{
+				ReturnValue = VideoFormat(int64_t(FormatToConvert));
+			}
+			else
+			{
+				ReturnValue = MB_VAAPI > FFMPEG_VAAPI ? VideoFormat(int64_t(FormatToConvert) + VAAPI_Distance) : VideoFormat(int64_t(FormatToConvert) - VAAPI_Distance);
+			}
+		}
+		return(ReturnValue);
 	}
 	//BEGIN StreamInfo
 	StreamInfo::StreamInfo(std::shared_ptr<void> FFMPEGContainerData, size_t StreamIndex)
@@ -316,6 +377,10 @@ namespace MBMedia
 	{
 		m_FrameConverter = FrameConverter(m_StreamTimebase,GetAudioParameters(), NewParameters);
 	}
+	void StreamDecoder::SetVideoConversionParameters(VideoParameters const& NewParameters)
+	{
+		m_FrameConverter = FrameConverter(m_StreamTimebase, GetVideoParameters(), NewParameters);
+	}
 	AudioParameters StreamDecoder::GetAudioParameters() const
 	{
 		AudioParameters ReturnValue;
@@ -329,8 +394,12 @@ namespace MBMedia
 	}
 	VideoParameters StreamDecoder::GetVideoParameters() const
 	{
-		throw std::exception();
-		return(VideoParameters());
+		VideoParameters ReturnValue;
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.Width = CodecContext->width;
+		ReturnValue.Height = CodecContext->height;
+		return(ReturnValue);
 	}
 	StreamDecoder::StreamDecoder(StreamInfo const& StreamToDecode)
 	{
@@ -593,12 +662,76 @@ namespace MBMedia
 
 	//END AudioConverter
 
+	//BEGIN VideoConverter
+	void _FreeSwsContext(void* ContextToFree)
+	{
+		SwsContext* FFMPEGContext = (SwsContext*)ContextToFree;
+		sws_freeContext(FFMPEGContext);
+	}
+	void swap(VideoConverter& LeftConverter, VideoConverter& RightConverter)
+	{
+		std::swap(LeftConverter.m_OldVideoParameters, RightConverter.m_OldVideoParameters);
+		std::swap(LeftConverter.m_NewVideoParameters, RightConverter.m_NewVideoParameters);
+		std::swap(LeftConverter.m_InputTimebase, RightConverter.m_InputTimebase);
+		std::swap(LeftConverter.m_ConversionContext, RightConverter.m_ConversionContext);
+	}
+	VideoConverter::VideoConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters)
+	{
+		m_OldVideoParameters = OldParameters;
+		m_NewVideoParameters = NewParameters;
+		m_InputTimebase = InputTimebase;
+		//Swsc
+		SwsContext* ConversionContext = sws_getContext(OldParameters.Width, OldParameters.Height,h_MBVideoFormatToFFMPEGVideoFormat(OldParameters.Format),
+			NewParameters.Width,NewParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(NewParameters.Format), SWS_BILINEAR,NULL,NULL,NULL);
+		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwsContext);
+	}
+	void VideoConverter::InsertFrame(StreamFrame const& FrameToInsert)
+	{
+		AVFrame* InputFrame = (AVFrame*)FrameToInsert.m_InternalData.get();
+		SwsContext* ConversionContext = (SwsContext*)m_ConversionContext.get();
 
+		//Kod snodd från https://lists.ffmpeg.org/pipermail/libav-user/2015-September/008473.html
+		AVFrame* NewFrame = av_frame_alloc();
+		NewFrame->width = m_NewVideoParameters.Width;
+		NewFrame->height = m_NewVideoParameters.Height;
+		NewFrame->format = h_MBVideoFormatToFFMPEGVideoFormat(m_NewVideoParameters.Format);
+		int numBytes = avpicture_get_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		assert(numBytes);
+		uint8_t* dataBuffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
+		NewFrame->data[0] = dataBuffer;
+		avpicture_fill((AVPicture*)NewFrame, dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		int Result = FFMPEGCall(sws_scale(ConversionContext, (const uint8_t* const*)InputFrame->data, InputFrame->linesize, 0, InputFrame->height, NewFrame->data, NewFrame->linesize));
+		if (Result < 0)
+		{
+			throw std::exception(); //leakar, mest gjord för debugging
+		}
+		NewFrame->pts = InputFrame->pts;
+		NewFrame->pkt_dts = InputFrame->pkt_dts;
+		NewFrame->pkt_duration = InputFrame->pkt_duration;
+		NewFrame->pkt_pts = InputFrame->pkt_pts;
+		m_StoredFrames.push(StreamFrame(NewFrame, FrameToInsert.GetTimeBase(), MediaType::Video));
+	}
+	StreamFrame VideoConverter::GetNextFrame()
+	{
+		StreamFrame ReturnValue;
+		if (m_StoredFrames.size() > 0)
+		{
+			ReturnValue = std::move(m_StoredFrames.front());
+			m_StoredFrames.pop();
+		}
+		return(ReturnValue);
+	}
+	void VideoConverter::Flush()
+	{
+		//Do nothing, conversion can be done completely frame by frame basis
+	}
+	//END VideoConverter
 
 	//BEGIN FrameConverter
 	void swap(FrameConverter& LeftConverter, FrameConverter& RightConverter)
 	{
 		std::swap(LeftConverter.m_AudioConverter, RightConverter.m_AudioConverter);
+		std::swap(LeftConverter.m_VideoConverter, RightConverter.m_VideoConverter);
 		std::swap(LeftConverter.m_Flushed, RightConverter.m_Flushed);
 		std::swap(LeftConverter.m_Type, RightConverter.m_Type);
 	}
@@ -613,7 +746,7 @@ namespace MBMedia
 	}
 	bool FrameConverter::IsInitialised()
 	{
-		return(m_AudioConverter != nullptr);
+		return(m_AudioConverter != nullptr || m_VideoConverter != nullptr);
 	}
 	void FrameConverter::Flush()
 	{
@@ -624,7 +757,7 @@ namespace MBMedia
 		}
 		else
 		{
-			throw std::exception();
+			m_VideoConverter->Flush();
 		}
 	}
 	void FrameConverter::InsertFrame(StreamFrame const& FrameToInsert)
@@ -635,7 +768,7 @@ namespace MBMedia
 		}
 		else
 		{
-			throw std::exception();
+			m_VideoConverter->InsertFrame(FrameToInsert);
 		}
 	}
 	StreamFrame FrameConverter::GetNextFrame()
@@ -646,19 +779,18 @@ namespace MBMedia
 		}
 		else
 		{
-			throw std::exception();
+			return(m_VideoConverter->GetNextFrame());
 		}
 	}
 	FrameConverter::FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters, AudioParameters const& NewParameters)
 	{
+		m_Type = MediaType::Audio;
 		m_AudioConverter = std::unique_ptr<AudioConverter>(new AudioConverter(InputTimebase, OldParameters, NewParameters));
-
 	}
-	FrameConverter::FrameConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, AudioParameters const& NewParameters)
+	FrameConverter::FrameConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters)
 	{
-		//m_InputTimebase = InputTimebase;
-		m_Type = MediaType::Null;
-		throw std::exception();
+		m_Type = MediaType::Video;
+		m_VideoConverter = std::unique_ptr<VideoConverter>(new VideoConverter(InputTimebase, OldParameters, NewParameters));
 	}
 	//StreamFrame FrameConverter::ConvertFrame(const StreamFrame* FrameToConvert)
 	//{
@@ -784,12 +916,12 @@ namespace MBMedia
 		VideoEncodeContext->rc_min_rate		= EncodeInfo.rc_min_rate;
 		VideoEncodeContext->time_base		= { EncodeInfo.time_base.num,EncodeInfo.time_base.den };
 		size_t Offset = 0;
-		AVPixelFormat FormatToUse = AV_PIX_FMT_NONE;
-		while (FFMpegCodec->pix_fmts[Offset] != -1)
-		{
-			FormatToUse = FFMpegCodec->pix_fmts[Offset];
-			Offset += 1;
-		}
+		AVPixelFormat FormatToUse = FFMpegCodec->pix_fmts[Offset];
+		//while (FFMpegCodec->pix_fmts[Offset] != -1)
+		//{
+		//	FormatToUse = FFMpegCodec->pix_fmts[Offset];
+		//	Offset += 1;
+		//}
 		VideoEncodeContext->pix_fmt = FormatToUse;
 
 		FFMPEGCall(avcodec_open2(VideoEncodeContext, FFMpegCodec, NULL));
@@ -849,14 +981,19 @@ namespace MBMedia
 	}
 	VideoParameters StreamEncoder::GetVideoParameters() const
 	{
-		throw std::exception();
+		VideoParameters ReturnValue;
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.Width = CodecContext->width;
+		ReturnValue.Height = CodecContext->height;
+		return(ReturnValue);
 	}
 	void StreamEncoder::InsertFrame(StreamFrame const& FrameToEncode)
 	{
 		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
 		m_InputTimeBase = FrameToEncode.GetTimeBase();
 		const AVFrame* FrameToSend = (const AVFrame*)FrameToEncode.m_InternalData.get();
-		if (m_Type == MediaType::Audio)
+		if (m_Type == MediaType::Video)
 		{
 			int hej = 2;
 		}
@@ -905,7 +1042,9 @@ namespace MBMedia
 			if (InputData.GetStreamInfo(i).GetMediaType() == MediaType::Video)
 			{
 				Decoders.push_back(StreamDecoder(InputData.GetStreamInfo(i)));
-				OutputData.AddOutputStream(StreamEncoder(NewVideoCodec, GetVideoEncodePresets(Decoders.back())));
+				StreamEncoder NewStreamEncoder = StreamEncoder(NewVideoCodec, GetVideoEncodePresets(Decoders.back()));
+				Decoders.back().SetVideoConversionParameters(NewStreamEncoder.GetVideoParameters());
+				OutputData.AddOutputStream(std::move(NewStreamEncoder));
 			}
 		}
 		OutputData.WriteHeader();
