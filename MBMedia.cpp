@@ -1,4 +1,4 @@
-
+#include "MBMedia.h"
 #ifdef _WIN32
 #include <unknwn.h>
 #include<strmif.h>
@@ -8,16 +8,19 @@
 #include <iostream>
 #include <filesystem>
 #include <assert.h>
-///*
 extern "C"
 {
-	#include <ffmpeg/libavcodec/avcodec.h>
-    #include <ffmpeg/libavformat/avformat.h>
+#include <ffmpeg/libavcodec/avcodec.h>
+#include <ffmpeg/libavformat/avformat.h>
+#include <ffmpeg/libswresample/swresample.h>
+#include <ffmpeg/libswscale/swscale.h>
+#include <ffmpeg/libavutil/audio_fifo.h>
+//#include <ffmpeg/libavutil/>
 }
+///*
 namespace MBMedia
 {
-	
-	void _h_Print_ffmpeg_Error(int ReadFrameResponse)
+	void h_Print_ffmpeg_Error(int ReadFrameResponse)
 	{
 		if (ReadFrameResponse >= 0)
 		{
@@ -25,530 +28,1095 @@ namespace MBMedia
 		}
 		char MessageBuffer[512];
 		av_strerror(ReadFrameResponse, MessageBuffer, 512);
-		std::cout <<"FFMpeg error: "<< MessageBuffer << std::endl;
+		std::cout << "FFMpeg error: " << MessageBuffer << std::endl;
 	}
-    int _FFMPEGCall(int ReadFrameResponse)
+	int FFMPEGCall(int ReadFrameResponse)
 	{
-		_h_Print_ffmpeg_Error(ReadFrameResponse);
+		h_Print_ffmpeg_Error(ReadFrameResponse);
 		return(ReadFrameResponse);
 	}
-class MBDecodeContext
-{
-public:
-	AVFormatContext* InputFormatContext = nullptr;
-	std::vector<AVCodecParameters*> InputCodecParameters = {};
-	std::vector<AVCodec*> InputCodecs = {};
-	std::vector<AVCodecContext*> DecodeCodecContext = {};
-	MBDecodeContext(std::string InputFilepath)
+	void _FreeFormatContext(void* DataToFree)
 	{
-		//transmux exempel
+		avformat_free_context((AVFormatContext*)DataToFree);
+		//FFMPEGCall();
+	}
+	MediaType h_FFMPEGMediaTypeToMBMediaType(AVMediaType TypeToConvert)
+	{
+		MediaType ReturnValue = MediaType::Null;
+		if (TypeToConvert == AVMEDIA_TYPE_VIDEO)
+		{
+			ReturnValue = MediaType::Video;
+		}
+		else if (TypeToConvert == AVMEDIA_TYPE_AUDIO)
+		{
+			ReturnValue = MediaType::Audio;
+		}
+		else if (TypeToConvert == AVMEDIA_TYPE_SUBTITLE)
+		{
+			ReturnValue = MediaType::Subtitles;
+		}
+		return(ReturnValue);
+	}
+	TimeBase h_RationalToTimebase(AVRational RationalToConvert)
+	{
+		TimeBase ReturnValue = { RationalToConvert.num,RationalToConvert.den };
+		return(ReturnValue);
+	}
+	struct MBMediaTypeConnector
+	{
+		Codec AssociatdCodec = Codec::Null;
+		MediaType AssociatedMediaType = MediaType::Null;
+		AVCodecID AssoicatedCodecId = (AVCodecID)-1;
+	};
+	const MBMediaTypeConnector ConnectedTypes[(size_t)Codec::Null] = {
+		{Codec::AAC,MediaType::Audio,AV_CODEC_ID_AAC},
+		{Codec::H264,MediaType::Video,AV_CODEC_ID_H264},
+		{Codec::H265,MediaType::Video,AV_CODEC_ID_H265},
+		{Codec::VP9,MediaType::Video,AV_CODEC_ID_VP9},
+	};
+	MediaType GetCodecMediaType(Codec InputCodec)
+	{
+		return(ConnectedTypes[size_t(InputCodec)].AssociatedMediaType);
+	}
+	Codec h_FFMPEGCodecTypeToMBCodec(AVCodecID TypeToConvert)
+	{
+		Codec ReturnValue = Codec::Null;
+		for (size_t i = 0; i < (size_t)Codec::Null; i++)
+		{
+			if (ConnectedTypes[i].AssoicatedCodecId == TypeToConvert)
+			{
+				ReturnValue = ConnectedTypes[i].AssociatdCodec;
+			}
+		}
+		return(ReturnValue);
+	}
+	SampleFormat h_FFMPEGAudioFormatToMBFormat(AVSampleFormat FormatToConvert)
+	{
+		return(SampleFormat(FormatToConvert));
+	}
+	AVSampleFormat h_MBSampleFormatToFFMPEGSampleFormat(SampleFormat FormatToConvert)
+	{
+		return(AVSampleFormat(FormatToConvert));
+	}
+	int64_t h_MBLayoutToFFMPEGLayout(ChannelLayout LayoutToConvert)
+	{
+		return(int64_t(LayoutToConvert));
+	}
+	ChannelLayout h_FFMPEGLayoutToMBLayout(int64_t LayoutToConvert)
+	{
+		return(ChannelLayout(LayoutToConvert));
+	}
+	VideoFormat h_FFMPEGVideoFormatToMBVideoFormat(AVPixelFormat FormatToConvert);
+	AVPixelFormat h_MBVideoFormatToFFMPEGVideoFormat(VideoFormat FormatToConvert)
+	{
+		AVPixelFormat ReturnValue = AVPixelFormat::AV_PIX_FMT_NONE;
+		int64_t MB_VAAPI = (uint64_t)VideoFormat::AV_PIX_FMT_VAAPI;
+		int64_t FFMPEG_VAAPI = (uint64_t)AVPixelFormat::AV_PIX_FMT_VAAPI;
+		if (MB_VAAPI == FFMPEG_VAAPI)
+		{
+			ReturnValue = AVPixelFormat(FormatToConvert);
+		}
+		else
+		{
+			int64_t Lowest_VAAPI = MB_VAAPI < FFMPEG_VAAPI ? MB_VAAPI : FFMPEG_VAAPI;
+			int64_t VAAPI_Distance = std::abs(MB_VAAPI - FFMPEG_VAAPI);
+			int64_t FormatToConvertDistance = int64_t(FormatToConvert) - Lowest_VAAPI;
+			if (FormatToConvertDistance <= VAAPI_Distance && FormatToConvertDistance >= 0)
+			{
+				throw std::exception();
+			}
+			if (FormatToConvertDistance < 0)
+			{
+				ReturnValue = AVPixelFormat(int64_t(FormatToConvert));
+			}
+			else
+			{
+				ReturnValue = MB_VAAPI < FFMPEG_VAAPI ? AVPixelFormat(int64_t(FormatToConvert) + VAAPI_Distance) : AVPixelFormat(int64_t(FormatToConvert) - VAAPI_Distance);
+			}
+		}
+		assert(h_FFMPEGVideoFormatToMBVideoFormat(ReturnValue) == FormatToConvert);
+		return(ReturnValue);
+	}
+	VideoFormat h_FFMPEGVideoFormatToMBVideoFormat(AVPixelFormat FormatToConvert)
+	{
+		VideoFormat ReturnValue = VideoFormat::Null;
+		int64_t MB_VAAPI = (uint64_t)VideoFormat::AV_PIX_FMT_VAAPI;
+		int64_t FFMPEG_VAAPI = (uint64_t)AVPixelFormat::AV_PIX_FMT_VAAPI;
+		if (MB_VAAPI == FFMPEG_VAAPI)
+		{
+			ReturnValue = VideoFormat(FormatToConvert);
+		}
+		else
+		{
+			int64_t Lowest_VAAPI = MB_VAAPI < FFMPEG_VAAPI ? MB_VAAPI : FFMPEG_VAAPI;
+			int64_t VAAPI_Distance = std::abs(MB_VAAPI - FFMPEG_VAAPI);
+			int64_t FormatToConvertDistance = int64_t(FormatToConvert) - Lowest_VAAPI;
+			if (FormatToConvertDistance <= VAAPI_Distance && FormatToConvertDistance >= 0)
+			{
+				throw std::exception();
+			}
+			if (FormatToConvertDistance < 0)
+			{
+				ReturnValue = VideoFormat(int64_t(FormatToConvert));
+			}
+			else
+			{
+				ReturnValue = MB_VAAPI > FFMPEG_VAAPI ? VideoFormat(int64_t(FormatToConvert) + VAAPI_Distance) : VideoFormat(int64_t(FormatToConvert) - VAAPI_Distance);
+			}
+		}
+		return(ReturnValue);
+	}
+	//BEGIN StreamInfo
+	StreamInfo::StreamInfo(std::shared_ptr<void> FFMPEGContainerData, size_t StreamIndex)
+	{
+		m_InternalData = FFMPEGContainerData;
+		m_StreamIndex = StreamIndex;
+		AVStream* StreamData = ((AVFormatContext*)FFMPEGContainerData.get())->streams[StreamIndex];
+		m_StreamCodec = h_FFMPEGCodecTypeToMBCodec( StreamData->codecpar->codec_id);
+		m_Type = h_FFMPEGMediaTypeToMBMediaType(StreamData->codecpar->codec_type);
+	}
+
+	//END StreamInfo
+
+	void _FreePacket(void* PacketToFree)
+	{
+		AVPacket* Packet = (AVPacket*)PacketToFree;
+		av_packet_free(&Packet);
+	}
+	//BEGIN StreamPacket
+	StreamPacket::StreamPacket(void* FFMPEGPacket,TimeBase PacketTimebase,MediaType PacketType)
+		//: m_ImplementationData(FFMPEGPacket, _FreePacket)
+	{
+		if (FFMPEGPacket != nullptr)
+		{
+			m_Type = PacketType;
+			m_InternalData = std::unique_ptr<void, void(*)(void*)>(FFMPEGPacket, _FreePacket);
+			m_TimeBase = PacketTimebase;
+		}
+	}
+	//float StreamPacket::GetDuration()
+	//{
+	//	return()
+	//}
+	TimeBase StreamPacket::GetTimebase()
+	{
+		return(m_TimeBase);
+	}
+	void StreamPacket::Rescale(TimeBase NewTimebase)
+	{
+		AVPacket* FFMPEGPacket = (AVPacket*)m_InternalData.get();
+		av_packet_rescale_ts(FFMPEGPacket, { m_TimeBase.num,m_TimeBase.den }, { NewTimebase.num,NewTimebase.den });
+		m_TimeBase = NewTimebase;
+	}
+	void StreamPacket::Rescale(TimeBase OriginalTimebase, TimeBase NewTimebase)
+	{
+		AVPacket* FFMPEGPacket = (AVPacket*)m_InternalData.get();
+		av_packet_rescale_ts(FFMPEGPacket, { OriginalTimebase.num,OriginalTimebase.den }, { NewTimebase.num,NewTimebase.den });
+		m_TimeBase = NewTimebase;
+	}
+	//END StreamPacket
+
+
+	//BEGIN ContainerDemuxer
+	ContainerDemuxer::ContainerDemuxer(std::string const& InputFile)
+	{
+		AVFormatContext* InputFormatContext;
 		InputFormatContext = avformat_alloc_context();
+		//avformat_new_stream
 		//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
-		_FFMPEGCall(avformat_open_input(&InputFormatContext, InputFilepath.c_str(), NULL, NULL));
+		FFMPEGCall(avformat_open_input(&InputFormatContext, InputFile.c_str(), NULL, NULL));
 		//läsar in data om själva datastreamsen
-		_FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
 		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
 		{
-			AVCodecParameters* NewInputCodecParamters = InputFormatContext->streams[i]->codecpar;
-			InputCodecParameters.push_back(NewInputCodecParamters);
-			AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
-			//TEST
-			//NewInputCodec->capabilities
-			//TEST
-			std::cout << NewInputCodec->name << std::endl;
-			InputCodecs.push_back(NewInputCodec);
-			//givet en codec och codec parameters så kan vi encoda/decoda data, men eftersom det är statefull kräver vi en encode/decode context
-			AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
-			_FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
-			//sedan måste vi öppna den, vet inte riktigt varför, initializerar den kanske?
-			_FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
-			DecodeCodecContext.push_back(NewCodexContext);
+			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte är en del av en public header
 		}
-		//all data för att decoda insamlad
 	}
-	void FreeMemory()
+	//bool ContainerDemuxer::EndOfFile()
+	//{
+	//	return(true);
+	//}
+	StreamInfo const& ContainerDemuxer::GetStreamInfo(size_t StreamIndex)
 	{
-		avformat_close_input(&InputFormatContext);
-		for (size_t i = 0; i < DecodeCodecContext.size(); i++)
+		return(m_InputStreams[StreamIndex]);
+	}
+	StreamPacket ContainerDemuxer::GetNextPacket(size_t* StreamIndex)
+	{
+		AVPacket* NewPacket = av_packet_alloc();
+		AVFormatContext* InputContext = (AVFormatContext*)m_InternalData.get();
+		int ReadResponse = FFMPEGCall(av_read_frame(InputContext, NewPacket));
+		if (ReadResponse >= 0)
 		{
-			avcodec_free_context(&DecodeCodecContext[i]);
+			AVStream* AssociatedStream = InputContext->streams[NewPacket->stream_index];
+			*StreamIndex = NewPacket->stream_index;
+			return(StreamPacket(NewPacket, { AssociatedStream->time_base.num,AssociatedStream->time_base.den }, h_FFMPEGMediaTypeToMBMediaType(AssociatedStream->codecpar->codec_type)));
+		}
+		else 
+		{
+			*StreamIndex = -1;
+			return(StreamPacket(nullptr, { 0,0 }, MediaType::Null));
 		}
 	}
-};
-class MBEncodeContext
-{
-public:
-	std::string OutFileName = "";
-	AVFormatContext* OutputFormatContext = nullptr;
-	MBAudioCodecs TargetAudioCodec = MBAudioCodecs::Null;
-	MBVideoCodecs TargetVideoCodec = MBVideoCodecs::Null;
-	MBEncodeContext(std::string OutputFilepath)
+	//END ContainerDemuxer
+
+	//BEGIN OutputContext
+	OutputContext::OutputContext(std::string const& OutputFile)
 	{
-		avformat_alloc_output_context2(&OutputFormatContext, NULL, NULL, OutputFilepath.c_str());
-		//all data för att decoda insamlad
+		AVFormatContext* OutputFormatContext = nullptr;
+		FFMPEGCall(avformat_alloc_output_context2(&OutputFormatContext, NULL, NULL, OutputFile.c_str()));
+		FFMPEGCall(avio_open(&OutputFormatContext->pb, OutputFile.c_str(), AVIO_FLAG_WRITE));
+		if (OutputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
+		{
+			OutputFormatContext->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+		}
+		m_InternalData = std::unique_ptr<void, void (*)(void*)>(OutputFormatContext, _FreeFormatContext);
 	}
-	MBEncodeContext(std::string OutputFilepath, MBAudioCodecs AudioCodecToUse, MBVideoCodecs VideoCodecToUse)
+
+	void OutputContext::AddOutputStream(StreamEncoder&& Encoder)
 	{
-		TargetAudioCodec = AudioCodecToUse;
-		TargetVideoCodec = VideoCodecToUse;
-		OutFileName = OutputFilepath;
-		avformat_alloc_output_context2(&OutputFormatContext, NULL, NULL, OutputFilepath.c_str());
-		//all data för att decoda insamlad
+		AVFormatContext* OutputFormatContext = (AVFormatContext*)m_InternalData.get();
+		AVCodecContext* EncoderContext = (AVCodecContext*)Encoder.m_InternalData.get();
+		const AVCodec* EncoderCodec = EncoderContext->codec;
+		m_OutputEncoders.push_back(std::move(Encoder));
+		AVStream* NewStream = avformat_new_stream(OutputFormatContext, EncoderCodec);
+		FFMPEGCall(avcodec_parameters_from_context(NewStream->codecpar, EncoderContext));
 	}
-	void FreeMemory()
+	void OutputContext::p_WritePacket(StreamPacket& PacketToWrite, size_t StreamIndex)
+	{
+		AVFormatContext* OutputFormat = (AVFormatContext*)m_InternalData.get();
+		PacketToWrite.Rescale({OutputFormat->streams[StreamIndex]->time_base.num, OutputFormat->streams[StreamIndex]->time_base.den	});
+		AVPacket* FFMpegPacket = (AVPacket*)PacketToWrite.m_InternalData.get();
+		//vet inte om det står någonstans, men man måste specifiera vilket index packetet är när man ska skriva till streamen...
+		FFMpegPacket->stream_index = StreamIndex;
+		if (StreamIndex == 1)
+		{
+			OutputFormat->streams[1]->codecpar->frame_size;
+			int hej = 2;
+		}
+		//FFMpegPacket->
+		std::cout << "Stream time: " << FFMpegPacket->pts * (double(OutputFormat->streams[StreamIndex]->time_base.num) / double(OutputFormat->streams[StreamIndex]->time_base.den)) << std::endl;
+		FFMPEGCall(av_interleaved_write_frame(OutputFormat, FFMpegPacket));
+	}
+	void OutputContext::p_WriteTrailer()
+	{
+		AVFormatContext* OutputFormat = (AVFormatContext*)m_InternalData.get();
+		FFMPEGCall(av_write_trailer(OutputFormat));
+	}
+	void OutputContext::WriteHeader()
+	{
+		AVFormatContext* OutputFormatContext = (AVFormatContext*)m_InternalData.get();
+		if (OutputFormatContext == nullptr)
+		{
+			return;
+		}
+		FFMPEGCall(avformat_write_header(OutputFormatContext, NULL));
+	}
+	void OutputContext::InsertFrame(StreamFrame const& FrameToInsert, size_t StreamIndex)
+	{
+		m_OutputEncoders[StreamIndex].InsertFrame(FrameToInsert);
+		while (true)
+		{
+			StreamPacket NewPacket = m_OutputEncoders[StreamIndex].GetNextPacket();
+			if (NewPacket.GetType() == MediaType::Null)
+			{
+				break;
+			}
+			//int hej = 0 / 0;
+			//NewPacket.Rescale(m_OutputEncoders[);
+			p_WritePacket(NewPacket, StreamIndex);
+		}
+	}
+	void OutputContext::Finalize()
+	{
+		for (size_t i = 0; i < m_OutputEncoders.size(); i++)
+		{
+			m_OutputEncoders[i].Flush();
+			while (true)
+			{
+				StreamPacket NewPacket = m_OutputEncoders[i].GetNextPacket();
+				if (NewPacket.GetType() == MediaType::Null)
+				{
+					break;
+				}
+				p_WritePacket(NewPacket, i);
+			}
+		}
+		p_WriteTrailer();
+	}
+	//END OutputContext
+	void _FreeFrame(void* FFMPEGFrameToFree) 
+	{
+		AVFrame* Frame =(AVFrame*)FFMPEGFrameToFree;
+		av_frame_free(&Frame);
+	}
+	//StreamFrame
+	StreamFrame::StreamFrame()
 	{
 
 	}
-};
-AVCodecID MBVideoCodecToFFMpegVideoCodec(MBVideoCodecs CodecToDecode)
-{
-	if (CodecToDecode == MBVideoCodecs::H265)
+	uint8_t** StreamFrame::GetData()
 	{
-		return(AV_CODEC_ID_H265);
-	}
-	else if (CodecToDecode == MBVideoCodecs::H264)
-	{
-		return(AV_CODEC_ID_H264);
-	}
-}
-std::string MBAudioCodecToString(MBAudioCodecs CodecToDecode)
-{
-	if (CodecToDecode == MBAudioCodecs::AAC)
-	{
-		return("aac");
-	}
-}
-
-
-MBError InternalTranscode(MBDecodeContext* DecodeData, MBEncodeContext* EncodeData)
-{
-	AVCodec* VideoCodec = avcodec_find_encoder(MBVideoCodecToFFMpegVideoCodec(EncodeData->TargetVideoCodec));
-	AVCodec* AudioCodec = avcodec_find_encoder_by_name(MBAudioCodecToString(EncodeData->TargetAudioCodec).c_str());
-	AVCodecContext* VideoEncodeContext = avcodec_alloc_context3(VideoCodec);
-	AVCodecContext* AudioEncodeContext = avcodec_alloc_context3(AudioCodec);
-	//letar fram den första video codexen
-	int FirstVideoIndex = -1;
-	AVCodecParameters* FirstVideoParameters = nullptr;
-	for (size_t i = 0; i < DecodeData->InputCodecParameters.size(); i++)
-	{
-		if (DecodeData->InputCodecParameters[i]->codec_type == AVMEDIA_TYPE_VIDEO)
+		if (m_MediaType == MediaType::Null)
 		{
-			FirstVideoIndex = i;
-			FirstVideoParameters = DecodeData->InputCodecParameters[i];
-			break;
+			return(nullptr);
+		}
+		AVFrame* FFMPEGFrame = (AVFrame*)m_InternalData.get();
+		return(FFMPEGFrame->data);
+	}
+	VideoParameters StreamFrame::GetVideoParameters() const
+	{
+		if (m_MediaType != MediaType::Video || m_InternalData.get() == nullptr)
+		{
+			throw std::exception();
+		}
+		const AVFrame* FFMPEGFrame = ( const AVFrame*)m_InternalData.get();
+		VideoParameters ReturnValue;
+		ReturnValue.Width = FFMPEGFrame->width;
+		ReturnValue.Height = FFMPEGFrame->height;
+		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat((AVPixelFormat) FFMPEGFrame->format);
+		return(ReturnValue);
+	}
+	AudioParameters StreamFrame::GetAudioParameters() const
+	{
+		throw std::exception();
+	}
+	StreamFrame::StreamFrame(void* FFMPEGData,TimeBase FrameTimeBase,MediaType FrameType)
+	{
+		if (FFMPEGData != nullptr)
+		{
+			m_InternalData = std::unique_ptr<void, void(*)(void*)>(FFMPEGData, _FreeFrame);
+			m_MediaType = FrameType;
+			m_TimeBase = FrameTimeBase;
 		}
 	}
-	AVRational input_framerate = av_guess_frame_rate(DecodeData->InputFormatContext, DecodeData->InputFormatContext->streams[FirstVideoIndex], NULL);
-	AVCodecContext* FirstVideoContext = DecodeData->DecodeCodecContext[FirstVideoIndex];
-	VideoEncodeContext->height = FirstVideoParameters->height;
-	VideoEncodeContext->width = FirstVideoParameters->width;
-	VideoEncodeContext->pix_fmt = VideoCodec->pix_fmts[0];
+	//StreamFrame
 
-	//DEBUG
-	std::vector<AVPixelFormat> PixelFormats;
-	size_t Offset = 0;
-	while (VideoCodec->pix_fmts[Offset] != -1)
+
+	//BEGIN StreamDecoder
+	void _FreeCodecContext(void* PointerToFree)
 	{
-		PixelFormats.push_back(VideoCodec->pix_fmts[Offset]);
-		Offset += 1;
+		AVCodecContext* CodecContext = (AVCodecContext*)PointerToFree;
+		avcodec_free_context(&CodecContext);
 	}
-	VideoEncodeContext->pix_fmt = PixelFormats.back();
-	//DEBUG
-	//control rate
-	FirstVideoContext->bit_rate;
-	//FirstVideoContext->time_base;
-	VideoEncodeContext->bit_rate			= 2 * 1000 * 1000;
-	VideoEncodeContext->rc_buffer_size		= 4 * 1000 * 1000;
-	VideoEncodeContext->rc_max_rate			= 2 * 1000 * 10000;
-	VideoEncodeContext->rc_min_rate			= 2.5 * 1000 * 1000;
-	//timebase
-	//testar för enkelhetens och vetenskapens skull att bara kopiera över alla data
-	VideoEncodeContext->time_base = av_inv_q(input_framerate);
-	AVRational AudioFrameRate = av_guess_frame_rate(DecodeData->InputFormatContext, DecodeData->InputFormatContext->streams[1], NULL);
-	int FirstAudioIndex = -1;
-	for (size_t i = 0; i < DecodeData->InputCodecParameters.size(); i++)
+	void StreamDecoder::SetAudioConversionParameters(AudioParameters const& NewParameters)
 	{
-		if (DecodeData->InputCodecParameters[i]->codec_type == AVMEDIA_TYPE_AUDIO)
+		m_FrameConverter = FrameConverter(m_StreamTimebase,GetAudioParameters(), NewParameters);
+	}
+	void StreamDecoder::SetVideoConversionParameters(VideoParameters const& NewParameters)
+	{
+		m_FrameConverter = FrameConverter(m_StreamTimebase, GetVideoParameters(), NewParameters);
+	}
+	AudioParameters StreamDecoder::GetAudioParameters() const
+	{
+		AudioParameters ReturnValue;
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
+		ReturnValue.SampleRate = CodecContext->sample_rate;
+		ReturnValue.NumberOfChannels = CodecContext->channels;
+		ReturnValue.FrameSize = CodecContext->frame_size;
+		ReturnValue.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		return(ReturnValue);
+	}
+	VideoParameters StreamDecoder::GetVideoParameters() const
+	{
+		VideoParameters ReturnValue;
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.Width = CodecContext->width;
+		ReturnValue.Height = CodecContext->height;
+		return(ReturnValue);
+	}
+	StreamDecoder::StreamDecoder(StreamInfo const& StreamToDecode)
+	{
+		AVFormatContext* ContainerFormat = (AVFormatContext*)StreamToDecode.m_InternalData.get();
+		AVCodecParameters* NewInputCodecParamters = ContainerFormat->streams[StreamToDecode.m_StreamIndex]->codecpar;
+		AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
+		AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
+		FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
+		//sedan måste vi öppna den, vet inte riktigt varför, initializerar den kanske?
+		FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
+		m_InternalData = std::shared_ptr<void>(NewCodexContext, _FreeCodecContext);
+		m_Type = h_FFMPEGMediaTypeToMBMediaType(NewInputCodec->type);
+		if (m_Type == MediaType::Audio)
 		{
-			FirstAudioIndex = i;
-			break;
+			m_CodecTimebase = { ContainerFormat->streams[StreamToDecode.m_StreamIndex]->time_base.num,ContainerFormat->streams[StreamToDecode.m_StreamIndex]->time_base.den };
+			m_StreamTimebase = m_CodecTimebase;
+		}
+		else if (m_Type == MediaType::Video)
+		{
+			//m_TimeBase = { ContainerFormat->streams[StreamToDecode.m_StreamIndex]->time_base.num,ContainerFormat->streams[StreamToDecode.m_StreamIndex]->time_base.den };
+			AVRational FrameRate = av_guess_frame_rate(ContainerFormat, ContainerFormat->streams[StreamToDecode.m_StreamIndex], NULL);
+			m_CodecTimebase = { FrameRate.den,FrameRate.num };
+			m_StreamTimebase = { ContainerFormat->streams[StreamToDecode.m_StreamIndex]->time_base.num,ContainerFormat->streams[StreamToDecode.m_StreamIndex]->time_base.den };
+		}
+		//DecodeCodecContext.push_back(NewCodexContext);
+	}
+	void StreamDecoder::InsertPacket(StreamPacket const& PacketToDecode)
+	{
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		const AVPacket* PacketToInsert = (const AVPacket*)PacketToDecode.m_InternalData.get();
+		FFMPEGCall(avcodec_send_packet(CodecContext, (const AVPacket*)PacketToDecode.m_InternalData.get()));
+	}
+	StreamFrame StreamDecoder::p_GetDecodedFrame()
+	{
+		StreamFrame ReturnValue = StreamFrame();
+		if (m_DecodeStreamFinished)
+		{
+			return(ReturnValue);
+		}
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		AVFrame* NewFrame = av_frame_alloc();
+		int RecieveResult = avcodec_receive_frame(CodecContext, NewFrame);
+		MediaType FrameType = m_Type;
+		if (RecieveResult < 0)
+		{
+			av_frame_free(&NewFrame);
+			FrameType = MediaType::Null;
+		}
+		if (m_Flushing && FrameType == MediaType::Null)
+		{
+			m_DecodeStreamFinished = true;
+		}
+		return(StreamFrame(NewFrame, m_StreamTimebase, m_Type));
+	}
+	StreamFrame StreamDecoder::GetNextFrame()
+	{
+		StreamFrame ReturnValue = p_GetDecodedFrame();
+		bool FrameConverted = false;
+		if (ReturnValue.GetMediaType() != MediaType::Null && m_FrameConverter.IsInitialised())
+		{
+			FrameConverted = true;
+			m_FrameConverter.InsertFrame(ReturnValue);
+			ReturnValue = m_FrameConverter.GetNextFrame();
+		}
+		//^ kan inte hända samtidigt
+		if (m_DecodeStreamFinished == true && m_FrameConverter.IsInitialised())
+		{
+			ReturnValue = m_FrameConverter.GetNextFrame();
+		}
+		return(ReturnValue);
+	}
+	void StreamDecoder::Flush()
+	{
+		m_Flushing = true;
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		FFMPEGCall(avcodec_send_packet(CodecContext, nullptr));
+		if (m_FrameConverter.IsInitialised())
+		{
+			m_FrameConverter.Flush();
 		}
 	}
-	AVCodecContext* FirstAudioContext = DecodeData->DecodeCodecContext[FirstAudioIndex];
-	//AudioEncodeContext->height = FirstAudioContext->height;
-	//AudioEncodeContext->width = FirstAudioContext->width;
-	//AudioEncodeContext->pix_fmt = AudioCodec->pix_fmts[0];
-	//control rate
-	AudioEncodeContext->bit_rate		= 2 * 1000 * 10000;
-	AudioEncodeContext->rc_buffer_size	= 4 * 1000 * 10000;
-	AudioEncodeContext->rc_max_rate		= 2 * 10000 * 100000;
-	AudioEncodeContext->rc_min_rate		= 2.5 * 100 * 100;
-	//timebase
-	//testar för enkelhetens och vetenskapens skull att bara kopiera över alla data
-	AudioEncodeContext->time_base = DecodeData->InputFormatContext->streams[1]->time_base;
-	AudioEncodeContext->sample_fmt = AudioCodec->sample_fmts[0];
-	AudioEncodeContext->channels = FirstAudioContext->channels;
-	AudioEncodeContext->channel_layout = FirstAudioContext->channel_layout;
-	//sample rate vad det nu betyder wtf
-	AudioEncodeContext->sample_rate = FirstAudioContext->sample_rate;
-	//nu har vi två förhoppningsvis fungerande decoders för ljud, då är det bara att faktiskt encoda våran frame
-	_FFMPEGCall(avcodec_open2(VideoEncodeContext, VideoCodec, NULL));
-	_FFMPEGCall(avcodec_open2(AudioEncodeContext, AudioCodec, NULL));
-	//AudioEncodeContext
-	std::vector<AVSampleFormat> SupportedSampleFormats;
-	Offset = 0;
-	while(AudioCodec->sample_fmts[Offset] != -1)
-	{
-		SupportedSampleFormats.push_back(AudioCodec->sample_fmts[Offset]);
-		Offset += 1;
-	}
-	//öppnar filen med nya streams som vi sedan kan skriva med
 
-	for (size_t i = 0; i < DecodeData->InputFormatContext->nb_streams; i++)
+	//END StreamDecoder
+
+	void _FreeSwrContext(void* ContextToFree)
 	{
-		AVStream* InputStream = DecodeData->InputFormatContext->streams[i];
-		AVStream* OutputStream = NULL;
-		//AVStream* InputStream = InputFormatContext->streams[i];
-		OutputStream = avformat_new_stream(EncodeData->OutputFormatContext, NULL);
-		//ser till att streamsen har rätt codex data som vi vill byta till
-		if (InputStream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+		SwrContext* FFMPEGContext = (SwrContext*)ContextToFree;
+		swr_free(&FFMPEGContext);
+	}
+	void _FreeAudioFifo(void* BufferToFree)
+	{
+		AVAudioFifo* FFMPEGBuffer = (AVAudioFifo*)BufferToFree;
+		av_audio_fifo_free(FFMPEGBuffer);
+	}
+
+	//BEGIN AudioConverter
+	void swap(AudioConverter& LeftConverter, AudioConverter& RightConverter)
+	{
+		std::swap(LeftConverter.m_Flushed, RightConverter.m_Flushed);
+		std::swap(LeftConverter.m_ConversionContext, RightConverter.m_ConversionContext);
+		std::swap(LeftConverter.m_AudioDataBuffer, RightConverter.m_AudioDataBuffer);
+		std::swap(LeftConverter.m_NewAudioParameters, RightConverter.m_NewAudioParameters);
+		std::swap(LeftConverter.DEBUG_LastTimestamp, RightConverter.DEBUG_LastTimestamp);
+		std::swap(LeftConverter.m_CurrentTimestamp, RightConverter.m_CurrentTimestamp);
+		std::swap(LeftConverter.m_FirstTimestampSet, RightConverter.m_FirstTimestampSet);
+		std::swap(LeftConverter.m_InputTimebase, RightConverter.m_InputTimebase);
+	}
+	AudioConverter::AudioConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters)
+	{
+		m_InputTimebase = InputTimebase;
+		m_NewAudioParameters = NewParameters;
+		m_OldAudioParameters = OldParameters;
+		SwrContext* ConversionContext = swr_alloc_set_opts(NULL,
+			h_MBLayoutToFFMPEGLayout(NewParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(NewParameters.AudioFormat),
+			NewParameters.SampleRate,
+			h_MBLayoutToFFMPEGLayout(OldParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(OldParameters.AudioFormat),
+			OldParameters.SampleRate,
+			0,
+			NULL);
+		FFMPEGCall(swr_init(ConversionContext));
+
+		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwrContext);
+		//FIFO Buffer
+		//TODO fix cases of output frame_size = 0 or input fram_size = 0
+		AVAudioFifo* AudioBuffer = av_audio_fifo_alloc(h_MBSampleFormatToFFMPEGSampleFormat(OldParameters.AudioFormat), OldParameters.NumberOfChannels, NewParameters.FrameSize * 2);
+		m_AudioDataBuffer = std::unique_ptr<void, void(*)(void*)>(AudioBuffer, _FreeAudioFifo);
+	}
+	AVFrame* h_GetFFMPEGFrame(AudioParameters const& AssociatedParameters, size_t NumberOfSamples)
+	{
+		AVFrame* ReturnValue = av_frame_alloc();
+		if (ReturnValue == NULL)
 		{
-			_FFMPEGCall(avcodec_parameters_from_context(OutputStream->codecpar, VideoEncodeContext));
+			throw std::exception();
 		}
-		else if (InputStream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
+		ReturnValue->format = h_MBSampleFormatToFFMPEGSampleFormat(AssociatedParameters.AudioFormat);
+		ReturnValue->channel_layout = h_MBLayoutToFFMPEGLayout(AssociatedParameters.Layout);
+		ReturnValue->pict_type = AV_PICTURE_TYPE_NONE;
+		ReturnValue->sample_rate = AssociatedParameters.SampleRate;
+		//TODO Frame size equal to zero means that it supports variable frames, but nb samples shouldn.t be zero
+		//assert(AssociatedParameters.FrameSize > 0);
+		ReturnValue->nb_samples = NumberOfSamples;
+		if (FFMPEGCall(av_frame_get_buffer(ReturnValue, 0)) < 0)
 		{
-			_FFMPEGCall(avcodec_parameters_from_context(OutputStream->codecpar, AudioEncodeContext));
+			throw std::exception();
+		}
+		return(ReturnValue);
+	}
+	void AudioConverter::p_ConvertNewFrame()
+	{
+		AVFrame* ConvertedFrame = h_GetFFMPEGFrame(m_NewAudioParameters, m_NewAudioParameters.FrameSize);
+
+		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioDataBuffer.get();
+		size_t InputFrameSize = m_NewAudioParameters.FrameSize;
+		if (InputFrameSize > av_audio_fifo_size(AudioBuffer))
+		{
+			InputFrameSize = av_audio_fifo_size(AudioBuffer);
+		}
+		if (InputFrameSize == 0)
+		{
+			_FreeFrame(ConvertedFrame);
+			return;
+		}
+		AVFrame* InputFrame = h_GetFFMPEGFrame(m_OldAudioParameters, InputFrameSize);
+		FFMPEGCall(av_audio_fifo_read(AudioBuffer, (void**)InputFrame->data, InputFrame->nb_samples));
+
+		SwrContext* ConversionContext = (SwrContext*)m_ConversionContext.get();
+		int ConversionResult = 0;
+		int64_t TimestampIncrease = ((m_InputTimebase.den / m_InputTimebase.num) * InputFrame->nb_samples) / InputFrame->sample_rate;
+		ConversionResult = swr_convert(ConversionContext, ConvertedFrame->data, ConvertedFrame->nb_samples, (uint8_t const**)InputFrame->data, InputFrame->nb_samples);
+		if (ConversionResult > 0)
+		{
+			ConvertedFrame->pts = m_CurrentTimestamp;
+			ConvertedFrame->pkt_dts = m_CurrentTimestamp;
+			ConvertedFrame->pkt_pts = m_CurrentTimestamp;
+			//ReturnValue = StreamFrame(ConvertedFrame, FrameToConvert->GetTimeBase(), m_Type);
+			ConvertedFrame->nb_samples = ConversionResult;
+			m_StoredFrames.push(StreamFrame(ConvertedFrame, m_InputTimebase, MediaType::Audio));
+			_FreeFrame(InputFrame);
 		}
 		else
 		{
-			_FFMPEGCall(avcodec_parameters_copy(OutputStream->codecpar, DecodeData->InputCodecParameters[i]));
-			//ser till att streamen tar global headers om format contexten gör det
-			if (EncodeData->OutputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
-			{
-				OutputStream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-			}
+			std::cout << "Converting Audioframe: ";
+			h_Print_ffmpeg_Error(ConversionResult);
+			_FreeFrame(ConvertedFrame);
+			_FreeFrame(InputFrame);
 		}
-		if (EncodeData->OutputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
-		{
-			//OutputStream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-			EncodeData->OutputFormatContext->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-		}
+		m_CurrentTimestamp += TimestampIncrease;
 	}
-	avio_open(&EncodeData->OutputFormatContext->pb, EncodeData->OutFileName.c_str(), AVIO_FLAG_WRITE);
-	_FFMPEGCall(avformat_write_header(EncodeData->OutputFormatContext, NULL));
-	AVFrame* InputFrame = av_frame_alloc();
-	AVPacket* InputPacket = av_packet_alloc();
-	AVStream* InStream = NULL;
-	AVStream* OutStream = NULL;
-	int ReadFrameResponse = 0;
-	int FlushedStreams = -1;
-	int Flushing = false;
-	int FlushCodex = false;
-	int FlushCodexIndex = -1;
-	while (true)
+	void AudioConverter::p_FlushBufferedFrames()
 	{
-		int StreamIndex;
-		if (!Flushing)
+		SwrContext* ConversionContext = (SwrContext*)m_ConversionContext.get();
+		//while (swr_get_delay(ConversionContext, m_NewAudioParameters.SampleRate) > m_NewAudioParameters.FrameSize) 
+		//{
+		//
+		//	if (swr_convert(swrContext, audioFrame->data,
+		//		audioFrame->nb_samples, NULL, 0) < 0) {
+		//		// handle error
+		//	}
+		//	// do stuff with your audioFrame
+		//}
+		size_t FlushedSamples = 0;
+		while (true)
 		{
-			ReadFrameResponse = av_read_frame(DecodeData->InputFormatContext, InputPacket);
-			StreamIndex = InputPacket->stream_index;
-			if (ReadFrameResponse < 0)
+			AVFrame* NewFrame = h_GetFFMPEGFrame(m_NewAudioParameters, m_NewAudioParameters.FrameSize);
+			FlushedSamples = swr_convert(ConversionContext, NewFrame->data, NewFrame->nb_samples, NULL, 0);
+			if (FlushedSamples < 0)
 			{
-				Flushing = true;
+				_FreeFrame(NewFrame);
+				std::cout << "Problem flushing Audio conversion: "; 
+				FFMPEGCall(FlushedSamples);
+				break;
 			}
-		}
-		//DEBUG
-		if (Flushing)
-		{
-			FlushedStreams += 1;
-			StreamIndex = FlushedStreams;
-			if (FlushedStreams > 1)
+			else if (FlushedSamples == 0)
 			{
-				FlushCodex = true;
+				_FreeFrame(NewFrame);
 			}
-			InputPacket = NULL;
-		}
-		else
-		{
-			StreamIndex = InputPacket->stream_index;
-		}
-		if (FlushCodex)
-		{
-			FlushCodexIndex += 1;
-			StreamIndex = FlushCodexIndex;
-			if (FlushCodexIndex > 1)
+			else
+			{
+				NewFrame->nb_samples = FlushedSamples;
+				m_StoredFrames.push(std::move(StreamFrame(NewFrame, m_InputTimebase, MediaType::Audio)));	
+			}
+			if (FlushedSamples < m_NewAudioParameters.FrameSize || FlushedSamples == 0)
 			{
 				break;
 			}
 		}
+	}
+	void AudioConverter::InsertFrame(StreamFrame const& FrameToInsert)
+	{
+		AVAudioFifo* AudioBuffer = (AVAudioFifo*) m_AudioDataBuffer.get();
+		AVFrame* InputFrame = (AVFrame*)FrameToInsert.m_InternalData.get();
+		if (m_FirstTimestampSet == false)
+		{
+			m_CurrentTimestamp = InputFrame->pts;
+			m_FirstTimestampSet = true;
+		}
+		av_audio_fifo_write(AudioBuffer, (void**)InputFrame->data, InputFrame->nb_samples);
+		while (av_audio_fifo_size(AudioBuffer) >= m_NewAudioParameters.FrameSize)
+		{
+			p_ConvertNewFrame();
+		}
+	}
+	StreamFrame AudioConverter::GetNextFrame()
+	{
+		StreamFrame ReturnValue;
+		if (m_StoredFrames.size() > 0)
+		{
+			ReturnValue = std::move(m_StoredFrames.front());
+			m_StoredFrames.pop();
+		}
+		return(ReturnValue);
+	}
+	void AudioConverter::Flush()
+	{
+		p_ConvertNewFrame();
+		p_FlushBufferedFrames();
+	}
+
+	//END AudioConverter
+
+	//BEGIN VideoConverter
+	void _FreeSwsContext(void* ContextToFree)
+	{
+		SwsContext* FFMPEGContext = (SwsContext*)ContextToFree;
+		sws_freeContext(FFMPEGContext);
+	}
+	void swap(VideoConverter& LeftConverter, VideoConverter& RightConverter)
+	{
+		std::swap(LeftConverter.m_OldVideoParameters, RightConverter.m_OldVideoParameters);
+		std::swap(LeftConverter.m_NewVideoParameters, RightConverter.m_NewVideoParameters);
+		std::swap(LeftConverter.m_InputTimebase, RightConverter.m_InputTimebase);
+		std::swap(LeftConverter.m_ConversionContext, RightConverter.m_ConversionContext);
+	}
+	VideoConverter::VideoConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters)
+	{
+		m_OldVideoParameters = OldParameters;
+		m_NewVideoParameters = NewParameters;
+		m_InputTimebase = InputTimebase;
+		//Swsc
+		SwsContext* ConversionContext = sws_getContext(OldParameters.Width, OldParameters.Height,h_MBVideoFormatToFFMPEGVideoFormat(OldParameters.Format),
+			NewParameters.Width,NewParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(NewParameters.Format), SWS_BILINEAR,NULL,NULL,NULL);
+		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwsContext);
+	}
+	void VideoConverter::InsertFrame(StreamFrame const& FrameToInsert)
+	{
+		AVFrame* InputFrame = (AVFrame*)FrameToInsert.m_InternalData.get();
+		SwsContext* ConversionContext = (SwsContext*)m_ConversionContext.get();
+
+		//Kod snodd från https://lists.ffmpeg.org/pipermail/libav-user/2015-September/008473.html
+		AVFrame* NewFrame = av_frame_alloc();
+		NewFrame->width = m_NewVideoParameters.Width;
+		NewFrame->height = m_NewVideoParameters.Height;
+		NewFrame->format = h_MBVideoFormatToFFMPEGVideoFormat(m_NewVideoParameters.Format);
+		int numBytes = avpicture_get_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		assert(numBytes);
+		uint8_t* dataBuffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
+		NewFrame->data[0] = dataBuffer;
+		avpicture_fill((AVPicture*)NewFrame, dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		//NewFrame->data
+		int Result = FFMPEGCall(sws_scale(ConversionContext, (const uint8_t* const*)InputFrame->data, InputFrame->linesize, 0, InputFrame->height, NewFrame->data, NewFrame->linesize));
+		if (Result < 0)
+		{
+			throw std::exception(); //leakar, mest gjord för debugging
+		}
+		NewFrame->pts = InputFrame->pts;
+		NewFrame->pkt_dts = InputFrame->pkt_dts;
+		NewFrame->pkt_duration = InputFrame->pkt_duration;
+		NewFrame->pkt_pts = InputFrame->pkt_pts;
+		m_StoredFrames.push(StreamFrame(NewFrame, FrameToInsert.GetTimeBase(), MediaType::Video));
+	}
+	StreamFrame VideoConverter::GetNextFrame()
+	{
+		StreamFrame ReturnValue;
+		if (m_StoredFrames.size() > 0)
+		{
+			ReturnValue = std::move(m_StoredFrames.front());
+			m_StoredFrames.pop();
+		}
+		return(ReturnValue);
+	}
+	void VideoConverter::Flush()
+	{
+		//Do nothing, conversion can be done completely frame by frame basis
+	}
+	//END VideoConverter
+	StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip)
+	{
+		VideoParameters ImageParameters = ImageToFlip.GetVideoParameters();
+		SwsContext* ConversionContext = sws_getContext(ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format),
+			ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format), SWS_BILINEAR, NULL, NULL, NULL);
+	}
+	//BEGIN FrameConverter
+	void swap(FrameConverter& LeftConverter, FrameConverter& RightConverter)
+	{
+		std::swap(LeftConverter.m_AudioConverter, RightConverter.m_AudioConverter);
+		std::swap(LeftConverter.m_VideoConverter, RightConverter.m_VideoConverter);
+		std::swap(LeftConverter.m_Flushed, RightConverter.m_Flushed);
+		std::swap(LeftConverter.m_Type, RightConverter.m_Type);
+	}
+	FrameConverter::FrameConverter(FrameConverter&& FrameConverterToSteal) noexcept
+	{
+		swap(*this,FrameConverterToSteal);
+	}
+	FrameConverter& FrameConverter::operator=(FrameConverter&& FrameConverterToSteal) noexcept
+	{
+		swap(*this, FrameConverterToSteal);
+		return(*this);
+	}
+	bool FrameConverter::IsInitialised()
+	{
+		return(m_AudioConverter != nullptr || m_VideoConverter != nullptr);
+	}
+	void FrameConverter::Flush()
+	{
+		m_Flushed = true;
+		if (m_Type == MediaType::Audio)
+		{
+			m_AudioConverter->Flush();
+		}
+		else
+		{
+			m_VideoConverter->Flush();
+		}
+	}
+	void FrameConverter::InsertFrame(StreamFrame const& FrameToInsert)
+	{
+		if (m_Type == MediaType::Audio)
+		{
+			m_AudioConverter->InsertFrame(FrameToInsert);
+		}
+		else
+		{
+			m_VideoConverter->InsertFrame(FrameToInsert);
+		}
+	}
+	StreamFrame FrameConverter::GetNextFrame()
+	{
+		if (m_Type == MediaType::Audio)
+		{
+			return(m_AudioConverter->GetNextFrame());
+		}
+		else
+		{
+			return(m_VideoConverter->GetNextFrame());
+		}
+	}
+	FrameConverter::FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters, AudioParameters const& NewParameters)
+	{
+		m_Type = MediaType::Audio;
+		m_AudioConverter = std::unique_ptr<AudioConverter>(new AudioConverter(InputTimebase, OldParameters, NewParameters));
+	}
+	FrameConverter::FrameConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters)
+	{
+		m_Type = MediaType::Video;
+		m_VideoConverter = std::unique_ptr<VideoConverter>(new VideoConverter(InputTimebase, OldParameters, NewParameters));
+	}
+	//StreamFrame FrameConverter::ConvertFrame(const StreamFrame* FrameToConvert)
+	//{
+		//TODO implement proper error handling in FrameConverter
+		//StreamFrame ReturnValue;
+		//if (m_Type == MediaType::Audio)
+		//{
+		//	if (FrameToConvert != nullptr && FrameToConvert->GetMediaType() != MediaType::Audio)
+		//	{
+		//		throw std::exception();
+		//	}
+		//	AVFrame* ConvertedFrame = av_frame_alloc();
+		//	if (ConvertedFrame == NULL)
+		//	{
+		//		throw std::exception();
+		//	}
+		//	ConvertedFrame->format = h_MBSampleFormatToFFMPEGSampleFormat(m_NewAudioParameters.AudioFormat);
+		//	ConvertedFrame->channel_layout = m_NewAudioParameters.m_ChannelLayout;
+		//	ConvertedFrame->pict_type = AV_PICTURE_TYPE_NONE;
+		//	//TODO Frame size equal to zero means that it supports variable frames, but nb samples shouldn.t be zero
+		//	assert(m_NewAudioParameters.FrameSize > 0);
+		//	ConvertedFrame->nb_samples = m_NewAudioParameters.FrameSize;
 		//
-		AVMediaType PacketMediaType = DecodeData->InputCodecParameters[StreamIndex]->codec_type;
-		InStream = DecodeData->InputFormatContext->streams[StreamIndex];
-		OutStream = EncodeData->OutputFormatContext->streams[StreamIndex];
-		
+		//
+		//	if (FFMPEGCall(av_frame_get_buffer(ConvertedFrame, 0)) < 0) 
+		//	{
+		//		throw std::exception();
+		//	}
+		//	AVFrame* InputFrame = nullptr;
+		//
+		//
+		//	SwrContext* ConversionContext = (SwrContext*)m_InternalData.get();
+		//	int ConversionResult = 0;
+		//	if (FrameToConvert != nullptr)
+		//	{
+		//		InputFrame = ( AVFrame *)FrameToConvert->m_InternalData.get();
+		//		if (m_FirstTimestampSet == false)
+		//		{
+		//			DEBUG_LastTimestamp = InputFrame->pts;
+		//			m_FirstTimestampSet = true;
+		//			m_CurrentTimestamp = InputFrame->pts;
+		//		}
+		//		else
+		//		{
+		//			assert(DEBUG_LastTimestamp < InputFrame->pts);
+		//			DEBUG_LastTimestamp = InputFrame->pts;
+		//			int64_t TimestampIncrease = ((m_InputTimebase.den/m_InputTimebase.num)*InputFrame->nb_samples)/InputFrame->sample_rate;
+		//			m_CurrentTimestamp += TimestampIncrease;
+		//		}
+		//		ConversionResult = swr_convert(ConversionContext, ConvertedFrame->data, ConvertedFrame->nb_samples, (uint8_t const**)InputFrame->data,InputFrame->nb_samples);
+		//	}
+		//	else
+		//	{
+		//		//mainly here for debugging, to be removed
+		//		m_Flushed = true;
+		//		ConversionResult = swr_convert(ConversionContext, ConvertedFrame->data, ConvertedFrame->nb_samples, NULL, 0);
+		//	}
+		//
+		//	
+		//	if (ConversionResult > 0)
+		//	{
+		//		ConvertedFrame->pts = m_CurrentTimestamp;
+		//		ConvertedFrame->pkt_dts = m_CurrentTimestamp;
+		//		ConvertedFrame->pkt_pts = m_CurrentTimestamp;
+		//		ReturnValue = StreamFrame(ConvertedFrame, FrameToConvert->GetTimeBase(), m_Type);
+		//	}
+		//	else
+		//	{
+		//		std::cout << "Converting Audioframe: ";
+		//		h_Print_ffmpeg_Error(ConversionResult);
+		//		_FreeFrame(ConvertedFrame);
+		//	}
+		//}
+		//else
+		//{
+		//	throw std::exception();
+		//}
+		//return(ReturnValue);
+	//}
+	//END FrameConverter
 
-		if (PacketMediaType == AVMEDIA_TYPE_AUDIO || PacketMediaType == AVMEDIA_TYPE_VIDEO)
+	//BEGIN StreamEncoder
+	TimeBase StreamEncoder::GetTimebase()
+	{
+		TimeBase ReturnValue;
+		if (m_InternalData.get() == nullptr)
 		{
-			AVPacket* OutputPacket = av_packet_alloc();
-			AVCodecContext* DecodeContextToUse = DecodeData->DecodeCodecContext[StreamIndex];
-		    if (FlushCodex)
-		    {
-			    InputFrame = NULL;
-			    goto FlushCodexLabel;
-		    }
+			return(ReturnValue);
+		}
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue = { CodecContext->time_base.num,CodecContext->time_base.den };
+		return(ReturnValue);
+	}
+	//void _FreeCodecContext(void* CodecToFree)
+	//{
+	//	avcodec_free_context((AVCodecContext**)&CodecToFree);
+	//}
+	VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy)
+	{
+		VideoEncodeInfo ReturnValue;
+		ReturnValue.bit_rate		= 2 * 1000 * 1000;
+		ReturnValue.rc_buffer_size	= 4 * 1000 * 10000;
+		ReturnValue.rc_max_rate		= 2 * 1000 * 10000;
+		ReturnValue.rc_min_rate		= 2.5 * 1000 * 100;
+		//
+		AVCodecContext* CodecContextToCopy = (AVCodecContext*)StreamToCopy.m_InternalData.get();
+		ReturnValue.height = CodecContextToCopy->height;
+		ReturnValue.width = CodecContextToCopy->width;
+		ReturnValue.time_base = StreamToCopy.GetCodecTimebase();
+		return(ReturnValue);
+	}
+	StreamEncoder::StreamEncoder(Codec StreamType, VideoEncodeInfo const& EncodeInfo)
+	{
+		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
+		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		AVCodecContext* VideoEncodeContext = avcodec_alloc_context3(FFMpegCodec);
 
-			//TEST
-			//av_packet_rescale_ts(InputPacket,DecodeData->InputFormatContext.)
-			//
-			int SendPacketResponse = _FFMPEGCall(avcodec_send_packet(DecodeContextToUse, InputPacket));
-			while (SendPacketResponse >= 0)
+		VideoEncodeContext->height			= EncodeInfo.height;
+		VideoEncodeContext->width			= EncodeInfo.width;
+		VideoEncodeContext->bit_rate		= EncodeInfo.bit_rate;
+		VideoEncodeContext->rc_buffer_size	= EncodeInfo.rc_buffer_size;
+		VideoEncodeContext->rc_max_rate		= EncodeInfo.rc_max_rate;
+		VideoEncodeContext->rc_min_rate		= EncodeInfo.rc_min_rate;
+		VideoEncodeContext->time_base		= { EncodeInfo.time_base.num,EncodeInfo.time_base.den };
+		size_t Offset = 0;
+		AVPixelFormat FormatToUse = FFMpegCodec->pix_fmts[Offset];
+		//while (FFMpegCodec->pix_fmts[Offset] != -1)
+		//{
+		//	FormatToUse = FFMpegCodec->pix_fmts[Offset];
+		//	Offset += 1;
+		//}
+		VideoEncodeContext->pix_fmt = FormatToUse;
+
+		FFMPEGCall(avcodec_open2(VideoEncodeContext, FFMpegCodec, NULL));
+		m_InternalData = std::unique_ptr<void, void (*)(void*)>(VideoEncodeContext, _FreeCodecContext);
+		m_Type = MediaType::Video;
+	}
+	AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy)
+	{
+		AudioEncodeInfo ReturnValue;
+		ReturnValue.bit_rate		=  2 * 1000 * 10000;
+		ReturnValue.rc_buffer_size	=  4 * 1000 * 10000;
+		ReturnValue.rc_max_rate		=  2 * 10000 * 100000;
+		ReturnValue.rc_min_rate		=  2.5 * 100 * 100;
+		//
+		AVCodecContext* CodecContextToCopy = (AVCodecContext*)StreamToCopy.m_InternalData.get();
+		ReturnValue.time_base = StreamToCopy.GetCodecTimebase();
+		ReturnValue.m_channels = CodecContextToCopy->channels;
+		ReturnValue.m_channels_layout = CodecContextToCopy->channel_layout;
+		ReturnValue.sample_rate = CodecContextToCopy->sample_rate;
+		//
+		return(ReturnValue);
+		//avcodec_parameters_from_context
+	}
+	StreamEncoder::StreamEncoder(Codec StreamType, AudioEncodeInfo const& EncodeInfo)
+	{
+		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
+		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		AVCodecContext* AudioEncodeContext = avcodec_alloc_context3(FFMpegCodec);
+		AudioEncodeContext->bit_rate		= EncodeInfo.bit_rate;
+		AudioEncodeContext->rc_buffer_size	= EncodeInfo.rc_buffer_size;
+		AudioEncodeContext->rc_max_rate		= EncodeInfo.rc_max_rate;
+		AudioEncodeContext->rc_min_rate		= EncodeInfo.rc_min_rate;
+		//
+		AudioEncodeContext->time_base		= { EncodeInfo.time_base.num,EncodeInfo.time_base.den };
+		//AudioEncodeContext->sample_fmt		=(AVSampleFormat) EncodeInfo.m_SampleFormat;
+		AudioEncodeContext->channels		= EncodeInfo.m_channels;
+		AudioEncodeContext->channel_layout	= EncodeInfo.m_channels_layout;
+		//sample rate vad det nu betyder wtf
+		AudioEncodeContext->sample_rate		= EncodeInfo.sample_rate;
+
+		AudioEncodeContext->sample_fmt = FFMpegCodec->sample_fmts[0];
+
+		avcodec_open2(AudioEncodeContext, FFMpegCodec, NULL);
+		m_InternalData = std::unique_ptr<void, void (*)(void*)>(AudioEncodeContext, _FreeCodecContext);
+		m_Type = MediaType::Audio;
+	}
+	AudioParameters StreamEncoder::GetAudioParameters() const
+	{
+		AudioParameters ReturnValue;
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
+		ReturnValue.SampleRate = CodecContext->sample_rate;
+		ReturnValue.NumberOfChannels = CodecContext->channels;
+		ReturnValue.FrameSize = CodecContext->frame_size;
+		ReturnValue.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		return(ReturnValue);
+	}
+	VideoParameters StreamEncoder::GetVideoParameters() const
+	{
+		VideoParameters ReturnValue;
+		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
+		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.Width = CodecContext->width;
+		ReturnValue.Height = CodecContext->height;
+		return(ReturnValue);
+	}
+	void StreamEncoder::InsertFrame(StreamFrame const& FrameToEncode)
+	{
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		m_InputTimeBase = FrameToEncode.GetTimeBase();
+		const AVFrame* FrameToSend = (const AVFrame*)FrameToEncode.m_InternalData.get();
+		if (m_Type == MediaType::Video)
+		{
+			int hej = 2;
+		}
+		//DEBUG
+		//FrameToSend->pict_type = AV_PICTURE_TYPE_NONE;
+		//
+		avcodec_send_frame(CodecContext,FrameToSend);
+	}
+	void StreamEncoder::Flush()
+	{
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		FFMPEGCall(avcodec_send_frame(CodecContext, nullptr));
+	}
+	StreamPacket StreamEncoder::GetNextPacket()
+	{
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		AVPacket* NewPacket = av_packet_alloc();
+		MediaType PacketType = m_Type;
+		int FFmpegResult = FFMPEGCall(avcodec_receive_packet(CodecContext,NewPacket));
+		if (FFmpegResult < 0)
+		{
+			av_packet_free(&NewPacket);
+		}
+		else
+		{
+			int Hej = 2;
+		}
+		return(StreamPacket(NewPacket,m_InputTimeBase, PacketType));
+	}
+
+	//END StreamEncoder
+	void Transcode(std::string const& InputFile, std::string const& OutputFile, Codec NewAudioCodec, Codec NewVideoCodec)
+	{
+		ContainerDemuxer InputData(InputFile);
+		std::vector<StreamDecoder> Decoders = {};
+		OutputContext OutputData(OutputFile);
+		for (size_t i = 0; i < InputData.NumberOfStreams(); i++)
+		{
+			if (InputData.GetStreamInfo(i).GetMediaType() == MediaType::Audio)
 			{
-				SendPacketResponse = avcodec_receive_frame(DecodeContextToUse, InputFrame);
-				if (SendPacketResponse == AVERROR(EAGAIN) || SendPacketResponse == AVERROR_EOF)
+				Decoders.push_back(StreamDecoder(InputData.GetStreamInfo(i)));
+				StreamEncoder NewStreamEncoder = StreamEncoder(NewAudioCodec, GetAudioEncodePresets(Decoders.back()));
+				Decoders.back().SetAudioConversionParameters(NewStreamEncoder.GetAudioParameters());
+				OutputData.AddOutputStream(std::move(NewStreamEncoder));
+			}
+			if (InputData.GetStreamInfo(i).GetMediaType() == MediaType::Video)
+			{
+				Decoders.push_back(StreamDecoder(InputData.GetStreamInfo(i)));
+				StreamEncoder NewStreamEncoder = StreamEncoder(NewVideoCodec, GetVideoEncodePresets(Decoders.back()));
+				Decoders.back().SetVideoConversionParameters(NewStreamEncoder.GetVideoParameters());
+				OutputData.AddOutputStream(std::move(NewStreamEncoder));
+			}
+		}
+		OutputData.WriteHeader();
+		while (true)
+		{
+			size_t PacketIndex = 0;
+			StreamPacket NewPacket = InputData.GetNextPacket(&PacketIndex);
+			if (NewPacket.GetType() == MediaType::Null)
+			{
+				break;
+			}
+			//if (NewPacket.GetType() == MediaType::Audio)
+			//{
+			//	continue;
+			//}
+			Decoders[PacketIndex].InsertPacket(NewPacket);
+			while (true)
+			{
+				StreamFrame NewFrame = Decoders[PacketIndex].GetNextFrame();
+				if (NewFrame.GetMediaType() == MediaType::Null)
 				{
-					//SendPacketResponse = 0;
-					if (SendPacketResponse == AVERROR_EOF)
-					{
-						std::cout << "Hmmm, kanske behöver flusha?" << std::endl;
-					}
 					break;
 				}
-				else if (SendPacketResponse < 0)
-				{
-					return -1;
-				}
-				//TEST
-				int64_t PTSBefore = InputFrame->pts;
-				//std::cout << "Inputframe pts: " << InputFrame->pts << std::endl;
-				InputFrame->pts = av_frame_get_best_effort_timestamp(InputFrame);
-				assert(PTSBefore == InputFrame->pts);
-				//std::cout << "pts after get best effort "<<InputFrame->pts << std::endl;
-				//TEST
-
-
-				//avcodec_send_frame(EncodeData->OutputFormatContext->streams[InputPacket->stream_index], InputFrame);
-FlushCodexLabel:
-				int SendFrameResponse = -1;
-				if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
-				{
-					//std::cout << InputFrame->pict_type << std::endl;
-					SendFrameResponse = _FFMPEGCall(avcodec_send_frame(AudioEncodeContext, InputFrame));
-				}
-				else
-				{
-					//std::cout << InputFrame->pict_type << std::endl;
-					//InputFrame->pict_type = AV_PICTURE_TYPE_NONE;
-					//InputFrame->key_frame = true;
-					//std::cout << InputFrame->pict_type << std::endl;
-					SendFrameResponse = _FFMPEGCall(avcodec_send_frame(VideoEncodeContext, InputFrame));
-				}
-				int DEBUG_PacketPerFrame = 0;
-				int RecievePacketResponse = 0;
-				while(RecievePacketResponse >= 0)
-				{
-					if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
-					{
-						RecievePacketResponse = avcodec_receive_packet(AudioEncodeContext, OutputPacket);
-					}
-					else if(PacketMediaType == AVMEDIA_TYPE_VIDEO)
-					{
-						RecievePacketResponse = avcodec_receive_packet(VideoEncodeContext, OutputPacket);
-					}
-					if (RecievePacketResponse == AVERROR(EAGAIN) || RecievePacketResponse == AVERROR_EOF)
-					{
-						//RecievePacketResponse = 0;
-						if (RecievePacketResponse == AVERROR_EOF)
-						{
-							std::cout << "Hmmm, kanske behöver flusha?" << std::endl;
-						}
-						break;
-					}
-					else if (RecievePacketResponse < 0)
-					{
-						return -1;
-					}
-					if (PacketMediaType == AVMEDIA_TYPE_VIDEO)
-					{
-						//std::cout << InputFrame->pict_type << std::endl;
-						//std::cout << InputFrame->pict_type << std::endl;
-						//InputFrame->pict_type = AV_PICTURE_TYPE_I;
-						//std::cout << "InDuration" << InputPacket->duration << std::endl;
-						//OutputPacket->duration =((InStream->time_base.den / InStream->time_base.num) / (InStream->avg_frame_rate.num * InStream->avg_frame_rate.den));
-						//std::cout << "OutDuration" << OutputPacket->duration << std::endl;
-						//std::cout << "BildData Som skrivs" << std::endl;
-					}
-					else
-					{
-						//std::cout << InputFrame->pict_type << std::endl;
-					}
-					DEBUG_PacketPerFrame += 1;
-					OutputPacket->stream_index = StreamIndex;
-
-					//DEBUG
-					//OutputPacket->duration = 0;
-					//DEBUG
-
-
-					//OutputPacket->duration = av_rescale_q(OutputPacket->duration, InStream->time_base, OutStream->time_base);
-					//std::cout << "Input Timestamp: " << InputPacket->pts << std::endl;
-					OutputPacket->duration = 0;
-					av_packet_rescale_ts(OutputPacket, InStream->time_base, OutStream->time_base);
-					if (PacketMediaType == AVMEDIA_TYPE_AUDIO)
-					{
-						//std::cout << OutputPacket->pts << std::endl;
-						//OutputPacket->duration = 20;
-						//OutputPacket->pts = InputFrame->pts;
-						//if (InputFrame->pict_type != AV_PICTURE_TYPE_I)
-						//{
-						//	continue;
-						//}
-						//continue;
-						std::cout << "Current packet time: " << OutputPacket->pts * (double(OutStream->time_base.num) / OutStream->time_base.den)<<"\n";
-					}
-					_FFMPEGCall(av_interleaved_write_frame(EncodeData->OutputFormatContext, OutputPacket));
-					//std::cout << "Output Timestamp: " << OutputPacket->pts << std::endl;
-				}
-				if (DEBUG_PacketPerFrame > 1)
-				{
-					std::cout << "PacketPerFrame > 1" << std::endl;
-				}
-				if (FlushCodex)
+				OutputData.InsertFrame(NewFrame, PacketIndex);
+			}
+		}
+		for (size_t i = 0; i < Decoders.size(); i++)
+		{
+			Decoders[i].Flush();
+			while (true)
+			{
+				StreamFrame NewFrame = Decoders[i].GetNextFrame();
+				if (NewFrame.GetMediaType() == MediaType::Null)
 				{
 					break;
 				}
-			}
-			//h_Print_ffmpeg_Error(response);
-			av_packet_unref(OutputPacket);
-			av_packet_free(&OutputPacket);
-			if (FlushCodex)
-			{
-				//break;
+				OutputData.InsertFrame(NewFrame, i);
 			}
 		}
+		OutputData.Finalize();
 	}
-	_h_Print_ffmpeg_Error(ReadFrameResponse);
-    av_frame_unref(InputFrame);
-	av_write_trailer(EncodeData->OutputFormatContext);
-	return(MBError(false));
-}
-MBError Transcode(std::string InputFilepath, std::string OutputFilepath, MBVideoCodecs NewVideoCodec, MBAudioCodecs NewAudioCodec)
-{
-	MBDecodeContext DecodeContextToUse(InputFilepath);
-	MBEncodeContext EncodeContextToUse(OutputFilepath, NewAudioCodec, NewVideoCodec);
-	MBError ReturnValue = InternalTranscode(&DecodeContextToUse, &EncodeContextToUse);
-	return(ReturnValue);
-}
-MBError Remux(std::string InputFilepath, std::string OutputFilepath)
-{
-	//transmux exempel
-	AVFormatContext* InputFormatContext = avformat_alloc_context();
-	//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
-	avformat_open_input(&InputFormatContext, InputFilepath.c_str(), NULL, NULL);
-	//läsar in data om själva datastreamsen
-	avformat_find_stream_info(InputFormatContext, NULL);
-	std::vector<AVCodecParameters*> InputCodecParameters = {};
-	std::vector<AVCodec*> InputCodecs = {};
-	std::vector<AVCodecContext*> DecodeCodecContext = {};
-	for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
-	{
-		AVCodecParameters* NewInputCodecParamters = InputFormatContext->streams[i]->codecpar;
-		InputCodecParameters.push_back(NewInputCodecParamters);
-		AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
-		std::cout << NewInputCodec->name << std::endl;
-		InputCodecs.push_back(NewInputCodec);
-		//givet en codec och codec parameters så kan vi encoda/decoda data, men eftersom det är statefull kräver vi en encode/decode context
-		AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
-		avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters);
-		//sedan måste vi öppna den, vet inte riktigt varför, initializerar den kanske?
-		avcodec_open2(NewCodexContext, NewInputCodec, NULL);
-		DecodeCodecContext.push_back(NewCodexContext);
-	}
-	//all data för att decoda insamlad
-
-
-
-	AVFormatContext* OutputFormatContext;
-	avformat_alloc_output_context2(&OutputFormatContext, NULL, NULL, OutputFilepath.c_str());
-	//skapar format kontexten som är vår out fil, sedan måste vi lägga till vad denna fil ska innehålla
-	for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
-	{
-		AVStream* OutputStream = NULL;
-		//AVStream* InputStream = InputFormatContext->streams[i];
-		OutputStream = avformat_new_stream(OutputFormatContext, NULL);
-		avcodec_parameters_copy(OutputStream->codecpar, InputCodecParameters[i]);
-		//ser till att streamen tar global headers om format contexten gör det
-		if (OutputFormatContext->oformat->flags & AVFMT_GLOBALHEADER)
-		{
-			OutputStream->codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-		}
-	}
-
-	//tror den bara kommer gissa output format pga filename
-	int ReadFrameResponse = avio_open(&OutputFormatContext->pb, OutputFilepath.c_str(), AVIO_FLAG_WRITE);
-	if (ReadFrameResponse < 0)
-	{
-		std::cout << "Error opening output file" << std::endl;
-	}
-	ReadFrameResponse = avformat_write_header(OutputFormatContext, NULL);
-	if (ReadFrameResponse < 0)
-	{
-		std::cout << "Error occurred when opening output file" << std::endl;
-	}
-
-	AVPacket ReadPacket;
-	while (true)
-	{
-		ReadFrameResponse = av_read_frame(InputFormatContext, &ReadPacket);
-		if (ReadFrameResponse < 0)
-		{
-			//all data är inläst
-			break;
-		}
-		//vi skriver till den nya filen packet för packet
-		AVStream* InStream = NULL;
-		AVStream* OutStream = NULL;
-		InStream = InputFormatContext->streams[ReadPacket.stream_index];
-		OutStream = OutputFormatContext->streams[ReadPacket.stream_index];
-
-		//Copy packet
-		ReadPacket.pts = av_rescale_q_rnd(ReadPacket.pts, InStream->time_base, OutStream->time_base, static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-		ReadPacket.dts = av_rescale_q_rnd(ReadPacket.dts, InStream->time_base, OutStream->time_base, static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-		ReadPacket.duration = av_rescale_q(ReadPacket.duration, InStream->time_base, OutStream->time_base);
-		ReadPacket.pos = -1;
-
-		ReadFrameResponse = av_interleaved_write_frame(OutputFormatContext, &ReadPacket);
-		if (ReadFrameResponse < 0)
-		{
-			std::cout << "Error demuxin packet" << std::endl;
-			break;
-		}
-		av_packet_unref(&ReadPacket);
-	}
-	av_write_trailer(OutputFormatContext);
-
-	avformat_close_input(&InputFormatContext);
-	avio_closep(&OutputFormatContext->pb);
-
-	avformat_free_context(OutputFormatContext);
-	return(MBError(true));
-}
-
-MBError CreateHLSStream(std::string InputFilePath,std::string OutputFolderName, float TargetDuration)
-{
-	std::filesystem::create_directory(OutputFolderName);
-	clock_t Timer = clock();
-	std::string CommandString = "ffmpeg -hide_banner -loglevel error -i ";
-	CommandString += InputFilePath;
-	std::string Resolution = "720p";
-	CommandString += " -c:a aac -ar 48000 -b:a 128k -c:v h264 -profile:v main -crf 20 -g 48 -keyint_min 96 -sc_threshold 0 -b:v 2500k -maxrate 2675k -bufsize 3750k -hls_time 8 -hls_playlist_type vod -hls_segment_filename ";
-	//skapar ett nytt directory som vi sparar filerna i
-	std::string HLS_FileName = OutputFolderName + "/" + Resolution + "_%03d.ts";
-	std::string PlayListFilename = OutputFolderName + "/" + "MasterPlaylist" + ".m3u8";
-	CommandString += HLS_FileName;
-	CommandString += " " + PlayListFilename;
-	std::system(CommandString.c_str());
-	std::cout << (clock() - Timer) / double(CLOCKS_PER_SEC) << std::endl;
-	return(MBError(false));
-}
 };
 //*/

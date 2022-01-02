@@ -106,13 +106,11 @@ endmacro()
 set(PROJECT_SOURCES 
 
 	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.cpp"
-	"${CMAKE_CURRENT_SOURCE_DIR}/MBMedia2.cpp"
 	"${CMAKE_CURRENT_SOURCE_DIR}/FFMPEGDocExample_Transcode.cpp"
 	"${CMAKE_CURRENT_SOURCE_DIR}/leandromoreira_Transcode.cpp"
 )
 set(PROJECT_HEADERS 
 	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.h"
-	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia2.h"
 )
 set(COMMON_INCLUDE_DIRECTORIES
    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/" 
@@ -121,13 +119,13 @@ set(COMMON_FILES ${PROJECT_SOURCES} ${PROJECT_HEADERS})
 set(COMMON_DYNAMIC_LIBRARIES 
 )
 set (FFMPEG_LIBS
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavcodec/libavcodec.a"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavdevice/libavdevice.a"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavfilter/libavfilter.a"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavformat/libavformat.a"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavutil/libavutil.a"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswresample/libswresample.a"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswscale/libswscale.a"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavcodec/libavcodec.lib"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavdevice/libavdevice.lib"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavfilter/libavfilter.lib"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavformat/libavformat.lib"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavutil/libavutil.lib"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswresample/libswresample.lib"
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswscale/libswscale.lib"
 )
 set(COMMON_STATIC_LIBRARIES
     ${FFMPEG_LIBS}
@@ -144,19 +142,19 @@ set(EXECUTABLE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/MBMediaTest.cpp"
 )
 
-add_library(MBMedia_SD STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia2.h")
+add_library(MBMedia_SD STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia.h")
 MBPM_ApplyTargetConfiguration("MBMedia_SD" "STATIC" "DEBUG")
 target_compile_features("MBMedia_SD" PRIVATE cxx_std_17)
 target_link_libraries("MBMedia_SD" ${COMMON_LIBRARIES})
 target_include_directories("MBMedia_SD" PRIVATE ${COMMON_INCLUDE_DIRECTORIES})
 
-add_library(MBMedia_SR STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia2.h")
+add_library(MBMedia_SR STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia.h")
 MBPM_ApplyTargetConfiguration("MBMedia_SR" "STATIC" "RELEASE")
 target_compile_features("MBMedia_SR" PRIVATE cxx_std_17)
 target_link_libraries("MBMedia_SR" ${COMMON_LIBRARIES})
 target_include_directories("MBMedia_SR" PRIVATE ${COMMON_INCLUDE_DIRECTORIES})
 
-add_executable(MBMediaTest ${COMMON_FILES} ${EXECUTABLE_FILES} "MBMedia2.h")
+add_executable(MBMediaTest ${COMMON_FILES} ${EXECUTABLE_FILES} "MBMedia.h")
 MBPM_ApplyTargetConfiguration("MBMediaTest" "STATIC" "DEBUG")
 target_compile_features("MBMediaTest" PRIVATE cxx_std_17)
 target_link_libraries("MBMediaTest" ${COMMON_LIBRARIES})
