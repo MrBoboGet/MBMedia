@@ -15,6 +15,7 @@ extern "C"
 #include <ffmpeg/libswresample/swresample.h>
 #include <ffmpeg/libswscale/swscale.h>
 #include <ffmpeg/libavutil/audio_fifo.h>
+#include <ffmpeg/libavutil/imgutils.h>
 //#include <ffmpeg/libavutil/>
 }
 ///*
@@ -348,6 +349,18 @@ namespace MBMedia
 	void _FreeFrame(void* FFMPEGFrameToFree) 
 	{
 		AVFrame* Frame =(AVFrame*)FFMPEGFrameToFree;
+		AVFrame* Frame2 =(AVFrame*)FFMPEGFrameToFree;
+		if (Frame->buf[0] == NULL)
+		{
+			//TODO herre gud vad ass, hacky sätt att få en frame att kunna freea även om jag allokera den med avpicture_fill, men då ska man bara ta bort försat pointer...
+			av_freep(&Frame->data[0]);
+			//size_t Offset = 0;
+			//while (Frame->data[Offset] != nullptr && Offset < AV_NUM_DATA_POINTERS)
+			//{
+			//	av_free(Frame->data[Offset]);
+			//	Offset++;
+			//}
+		}
 		av_frame_free(&Frame);
 	}
 	//StreamFrame
@@ -376,6 +389,11 @@ namespace MBMedia
 		ReturnValue.Height = FFMPEGFrame->height;
 		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat((AVPixelFormat) FFMPEGFrame->format);
 		return(ReturnValue);
+	}
+	int64_t StreamFrame::GetPresentationTime() const
+	{
+		const AVFrame* FFMPEGFrame = (const AVFrame*)m_InternalData.get();
+		return(FFMPEGFrame->pts);
 	}
 	AudioParameters StreamFrame::GetAudioParameters() const
 	{
@@ -711,21 +729,35 @@ namespace MBMedia
 			NewParameters.Width,NewParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(NewParameters.Format), SWS_BILINEAR,NULL,NULL,NULL);
 		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwsContext);
 	}
+	AVFrame* h_GetFFMPEGFrame(int Width, int Height, VideoFormat FormatToUse)
+	{
+		AVFrame* NewFrame = av_frame_alloc();
+		NewFrame->width = Width;
+		NewFrame->height = Height;
+		NewFrame->format = h_MBVideoFormatToFFMPEGVideoFormat(FormatToUse);
+		int numBytes = avpicture_get_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		//assert(numBytes);
+		uint8_t* dataBuffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
+		//NewFrame->data[0] = dataBuffer;
+		//av_image_filla
+		//av_image_fi
+		avpicture_fill((AVPicture*)NewFrame, dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		//av_image_fill_arrays(NewFrame->data, NewFrame->linesize, dataBuffer,h_MBVideoFormatToFFMPEGVideoFormat(FormatToUse), Width, Height, 0);
+		//av_free(dataBuffer);
+		//FFMPEGCall(av_image_alloc(NewFrame->data,NewFrame->linesize,NewFrame->width,NewFrame->height,h_MBVideoFormatToFFMPEGVideoFormat(FormatToUse),0));
+		//_FreeFrame(NewFrame);
+		//av_free(dataBuffer);
+		//int hej = dataBuffer[0];
+		//av_free(dataBuffer);
+		return(NewFrame);
+	}
 	void VideoConverter::InsertFrame(StreamFrame const& FrameToInsert)
 	{
 		AVFrame* InputFrame = (AVFrame*)FrameToInsert.m_InternalData.get();
 		SwsContext* ConversionContext = (SwsContext*)m_ConversionContext.get();
 
 		//Kod snodd från https://lists.ffmpeg.org/pipermail/libav-user/2015-September/008473.html
-		AVFrame* NewFrame = av_frame_alloc();
-		NewFrame->width = m_NewVideoParameters.Width;
-		NewFrame->height = m_NewVideoParameters.Height;
-		NewFrame->format = h_MBVideoFormatToFFMPEGVideoFormat(m_NewVideoParameters.Format);
-		int numBytes = avpicture_get_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
-		assert(numBytes);
-		uint8_t* dataBuffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
-		NewFrame->data[0] = dataBuffer;
-		avpicture_fill((AVPicture*)NewFrame, dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		AVFrame* NewFrame = h_GetFFMPEGFrame(m_NewVideoParameters.Width, m_NewVideoParameters.Height, m_NewVideoParameters.Format);
 		//NewFrame->data
 		int Result = FFMPEGCall(sws_scale(ConversionContext, (const uint8_t* const*)InputFrame->data, InputFrame->linesize, 0, InputFrame->height, NewFrame->data, NewFrame->linesize));
 		if (Result < 0)
@@ -753,11 +785,71 @@ namespace MBMedia
 		//Do nothing, conversion can be done completely frame by frame basis
 	}
 	//END VideoConverter
-	StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip)
+	//StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip)
+	//{
+	//	StreamFrame ReturnValue;
+	//	const AVFrame* InputFrame = (const AVFrame*)ImageToFlip.m_InternalData.get();
+	//	if (InputFrame == nullptr || ImageToFlip.GetMediaType() != MediaType::Video)
+	//	{
+	//		throw std::exception();
+	//	}
+	//	VideoParameters ImageParameters = ImageToFlip.GetVideoParameters();
+	//	AVFrame* NewFrame = h_GetFFMPEGFrame(ImageParameters.Width, ImageParameters.Height, ImageParameters.Format);
+	//	//SwsContext* ConversionContext = sws_getContext(ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format),
+	//	//	ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format), SWS_BILINEAR, NULL, NULL, NULL);
+	//	//int Result = FFMPEGCall(sws_scale(ConversionContext, (const uint8_t* const*)InputFrame->data, InputFrame->linesize, 0, InputFrame->height, NewFrame->data, NewFrame->linesize));
+	//	int Result = 0;
+	//	size_t Offset = 0;
+	//	while (InputFrame->data[Offset] != NULL)
+	//	{
+	//		for (size_t i = 0; i < InputFrame->height; i++)
+	//		{
+	//			memcpy(NewFrame->data[Offset] + (((InputFrame->height-1-i) * InputFrame->linesize[Offset]))
+	//				,InputFrame->data[Offset] + (i * InputFrame->linesize[Offset]) ,InputFrame->linesize[Offset]);
+	//		}
+	//		//Offset += 1;
+	//		break;
+	//	}
+	//	
+	//	if (Result >= 0)
+	//	{
+	//		NewFrame->pts = InputFrame->pts;
+	//		NewFrame->pkt_dts = InputFrame->pkt_dts;
+	//		NewFrame->pkt_duration = InputFrame->pkt_duration;
+	//		NewFrame->pkt_pts = InputFrame->pkt_pts;
+	//		ReturnValue = StreamFrame(NewFrame, ImageToFlip.GetTimeBase(), MediaType::Video);
+	//	}
+	//	else
+	//	{
+	//		_FreeFrame(NewFrame);
+	//	}
+	//	return(ReturnValue);
+	//}
+	StreamFrame FlipRGBPictureHorizontally(StreamFrame const& ImageToFlip)
 	{
+		StreamFrame ReturnValue;
+		//const AVFrame* InputFrame = (const AVFrame*)ImageToFlip.m_InternalData.get();
+		if (ImageToFlip.GetMediaType() != MediaType::Video)
+		{
+			throw std::exception();
+		}
 		VideoParameters ImageParameters = ImageToFlip.GetVideoParameters();
-		SwsContext* ConversionContext = sws_getContext(ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format),
-			ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format), SWS_BILINEAR, NULL, NULL, NULL);
+		AVFrame* NewFrame = h_GetFFMPEGFrame(ImageParameters.Width, ImageParameters.Height, ImageParameters.Format);
+		const AVFrame* InputFrame = (const AVFrame*)ImageToFlip.m_InternalData.get();
+		//SwsContext* ConversionContext = sws_getContext(ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format),
+		//	ImageParameters.Width, ImageParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(ImageParameters.Format), SWS_BILINEAR, NULL, NULL, NULL);
+		//int Result = FFMPEGCall(sws_scale(ConversionContext, (const uint8_t* const*)InputFrame->data, InputFrame->linesize, 0, InputFrame->height, NewFrame->data, NewFrame->linesize));
+		int Result = 0;
+		for (size_t i = 0; i < InputFrame->height; i++)
+		{
+			memcpy(NewFrame->data[0] + (((InputFrame->height - 1 - i) * InputFrame->linesize[0]))
+				, InputFrame->data[0] + (i * InputFrame->linesize[0]), InputFrame->linesize[0]);
+		}
+		NewFrame->pts = InputFrame->pts;
+		NewFrame->pkt_dts = InputFrame->pkt_dts;
+		NewFrame->pkt_duration = InputFrame->pkt_duration;
+		NewFrame->pkt_pts = InputFrame->pkt_pts;
+		return(StreamFrame(NewFrame,ImageToFlip.GetTimeBase(),MediaType::Video));
 	}
 	//BEGIN FrameConverter
 	void swap(FrameConverter& LeftConverter, FrameConverter& RightConverter)
@@ -1100,6 +1192,12 @@ namespace MBMedia
 				{
 					break;
 				}
+				//DEBUG
+				//if (NewFrame.GetMediaType() == MediaType::Video)
+				//{
+				//	NewFrame = FlipPictureHorizontally(NewFrame);
+				//}
+				//DEBUG
 				OutputData.InsertFrame(NewFrame, PacketIndex);
 			}
 		}

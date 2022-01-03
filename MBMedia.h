@@ -144,6 +144,12 @@ namespace MBMedia
 	}
 	void _FreePacket(void*);
 	
+	//struct PresentationData
+	//{
+	//private:
+	//
+	//};
+
 	class StreamPacket
 	{
 	private:
@@ -174,17 +180,20 @@ namespace MBMedia
 		friend class StreamEncoder;
 		friend class AudioConverter;
 		friend class VideoConverter;
+		friend StreamFrame FlipRGBPictureHorizontally(StreamFrame const& ImageToFlip);
+		//friend StreamFrame FlipPictureHorizontally(StreamFrame const&);
 		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
 		MediaType m_MediaType = MediaType::Null;
 		TimeBase m_TimeBase;
 		StreamFrame(void* FFMPEGData,TimeBase FrameTimeBase,MediaType FrameType);
 	public:
 		StreamFrame();
+		int64_t GetPresentationTime() const;
 		TimeBase GetTimeBase()const {return(m_TimeBase);};
 		MediaType GetMediaType() const { return(m_MediaType); };
 
-		VideoParameters GetVideoParameters();
-		AudioParameters GetAudioParameters();
+		VideoParameters GetVideoParameters() const;
+		AudioParameters GetAudioParameters() const;
 		uint8_t** GetData();
 	};
 	class AudioConverter
@@ -227,7 +236,8 @@ namespace MBMedia
 		StreamFrame GetNextFrame();
 		void Flush();
 	};
-	StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip);
+	//StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip);
+	StreamFrame FlipRGBPictureHorizontally(StreamFrame const& ImageToFlip);
 	class FrameConverter
 	{
 	private:
