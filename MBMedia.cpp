@@ -234,6 +234,100 @@ namespace MBMedia
 			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte är en del av en public header
 		}
 	}
+	int h_ReadSearchableInputData(void* UserData, uint8_t* OutputBuffer, int buf_size)
+	{
+		ContainerDemuxer* Demuxer =(ContainerDemuxer*) UserData;
+		size_t BytesRead = 0;
+		bool ShouldReadFromStream = false;
+		if (Demuxer->m_ProbedData.size() > Demuxer->m_ReadProbeData)
+		{
+			size_t BytesToRead = Demuxer->m_ProbedData.size() - Demuxer->m_ReadProbeData >= buf_size ? buf_size : Demuxer->m_ProbedData.size() - Demuxer->m_ReadProbeData;
+			BytesRead = BytesToRead;
+			if (BytesRead < buf_size)
+			{
+				ShouldReadFromStream = true;
+			}
+		}
+		else
+		{
+			ShouldReadFromStream = true;
+		}
+		if (ShouldReadFromStream)
+		{
+			BytesRead += Demuxer->m_CostumIO->Read(OutputBuffer + BytesRead, buf_size - BytesRead);
+		}
+		if (BytesRead == 0)
+		{
+			return(AVERROR_EOF);
+		}
+		return(BytesRead);
+	}
+	int64_t h_SeekSearchableInputStream(void* UserData, int64_t SeekCount, int whence)
+	{
+		ContainerDemuxer* Demuxer = (ContainerDemuxer*) UserData;
+		int64_t ReturnValue = -1;
+		if (whence==AVSEEK_SIZE)
+		{
+			ReturnValue = -1;
+		}
+		if (whence == SEEK_SET)
+		{
+			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(SeekCount);
+		}
+		if (whence == SEEK_CUR)
+		{
+			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(Demuxer->m_CostumIO->GetInputPosition() + SeekCount);
+		}
+		if (whence == SEEK_END)
+		{
+			ReturnValue = -1;
+		}
+		return(ReturnValue);
+	}
+	ContainerDemuxer::ContainerDemuxer(std::unique_ptr<MBUtility::MBSearchableInputStream>&& InputStream)
+	{
+		AVFormatContext* InputFormatContext;
+		InputFormatContext = avformat_alloc_context();
+		//avformat_new_stream
+		//InputFormatContext->pb
+		m_CostumIO = std::move(InputStream);
+		InputFormatContext->flags|=AVFMT_FLAG_CUSTOM_IO;
+		InputFormatContext->pb = avio_alloc_context((unsigned char*)av_malloc(8192), 8192, 0, this, h_ReadSearchableInputData, NULL, h_SeekSearchableInputStream);
+		//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
+		//InputFormatContext->ifo
+
+		const size_t ProbeDataSize = 1000000;
+		//uint8_t* ProbeData[ProbeDataSize + AVPROBE_PADDING_SIZE];
+		//memset(ProbeData, 0, ProbeDataSize + AVPROBE_PADDING_SIZE);
+		m_ProbedData = std::string(ProbeDataSize, 0);
+		size_t ReadBytes = m_CostumIO->Read(m_ProbedData.data(), ProbeDataSize);
+		m_ProbedData.resize(ReadBytes);
+		AVProbeData ProbeStruct;
+		ProbeStruct.buf = (unsigned char*)m_ProbedData.data();
+		ProbeStruct.buf_size = ProbeDataSize;
+		ProbeStruct.filename = "";
+		ProbeStruct.mime_type = "";
+		InputFormatContext->iformat = av_probe_input_format(&ProbeStruct, 1);
+		//InputFormatContext->iformat =(AVInputFormat*)123123123;
+		m_ProbedData = "";//OBS efersom vi antar att streamen är searchable, kanske inte alltid är det?
+		m_CostumIO->SetInputPosition(0);
+		FFMPEGCall(avformat_open_input(&InputFormatContext, "", NULL, NULL));
+		//läsar in data om själva datastreamsen
+		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
+		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
+		{
+			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte är en del av en public header
+		}
+	}
+	ContainerDemuxer::~ContainerDemuxer()
+	{
+		if (m_CostumIO != nullptr)
+		{
+			AVFormatContext*  FormatContext= (AVFormatContext *)m_InternalData.get();
+			av_free(FormatContext->pb->buffer);
+		}
+	}
 	//bool ContainerDemuxer::EndOfFile()
 	//{
 	//	return(true);
@@ -246,7 +340,7 @@ namespace MBMedia
 	{
 		AVPacket* NewPacket = av_packet_alloc();
 		AVFormatContext* InputContext = (AVFormatContext*)m_InternalData.get();
-		int ReadResponse = FFMPEGCall(av_read_frame(InputContext, NewPacket));
+		int ReadResponse = av_read_frame(InputContext, NewPacket);
 		if (ReadResponse >= 0)
 		{
 			AVStream* AssociatedStream = InputContext->streams[NewPacket->stream_index];
@@ -296,7 +390,7 @@ namespace MBMedia
 			int hej = 2;
 		}
 		//FFMpegPacket->
-		std::cout << "Stream time: " << FFMpegPacket->pts * (double(OutputFormat->streams[StreamIndex]->time_base.num) / double(OutputFormat->streams[StreamIndex]->time_base.den)) << std::endl;
+		//std::cout << "Stream time: " << FFMpegPacket->pts * (double(OutputFormat->streams[StreamIndex]->time_base.num) / double(OutputFormat->streams[StreamIndex]->time_base.den)) << std::endl;
 		FFMPEGCall(av_interleaved_write_frame(OutputFormat, FFMpegPacket));
 	}
 	void OutputContext::p_WriteTrailer()
@@ -1136,14 +1230,14 @@ namespace MBMedia
 		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
 		AVPacket* NewPacket = av_packet_alloc();
 		MediaType PacketType = m_Type;
-		int FFmpegResult = FFMPEGCall(avcodec_receive_packet(CodecContext,NewPacket));
+		int FFmpegResult = avcodec_receive_packet(CodecContext,NewPacket);
 		if (FFmpegResult < 0)
 		{
 			av_packet_free(&NewPacket);
 		}
 		else
 		{
-			int Hej = 2;
+			
 		}
 		return(StreamPacket(NewPacket,m_InputTimeBase, PacketType));
 	}
@@ -1151,7 +1245,8 @@ namespace MBMedia
 	//END StreamEncoder
 	void Transcode(std::string const& InputFile, std::string const& OutputFile, Codec NewAudioCodec, Codec NewVideoCodec)
 	{
-		ContainerDemuxer InputData(InputFile);
+		//ContainerDemuxer InputData(InputFile);
+		ContainerDemuxer InputData(std::unique_ptr<MBUtility::MBFileInputStream>(new MBUtility::MBFileInputStream(InputFile)));
 		std::vector<StreamDecoder> Decoders = {};
 		OutputContext OutputData(OutputFile);
 		for (size_t i = 0; i < InputData.NumberOfStreams(); i++)

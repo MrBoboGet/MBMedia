@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <queue>
 #include "PixelFormats.h"
+#include <MBUtility/MBInterfaces.h>
 ///*
 namespace MBMedia
 {
@@ -344,8 +345,13 @@ namespace MBMedia
 	class ContainerDemuxer
 	{
 	private:
+		friend 	int64_t h_SeekSearchableInputStream(void* UserData, int64_t SeekCount, int whence);
+		friend int h_ReadSearchableInputData(void* UserData, uint8_t* OutputBuffer, int buf_size);
 		std::shared_ptr<void> m_InternalData = nullptr;
+		std::unique_ptr<MBUtility::MBSearchableInputStream> m_CostumIO = {};
 		std::vector<StreamInfo> m_InputStreams = {};
+		std::string m_ProbedData = "";
+		size_t m_ReadProbeData = 0;
 		bool m_FileEnded = false;
 	public:
 		size_t NumberOfStreams() { return(m_InputStreams.size()); }
@@ -354,7 +360,8 @@ namespace MBMedia
 		//bool EndOfFile();
 
 		ContainerDemuxer(std::string const& InputFile);
-		//~ContainerDemuxer();
+		ContainerDemuxer(std::unique_ptr<MBUtility::MBSearchableInputStream>&& InputStream);
+		~ContainerDemuxer();
 	};
 	class OutputContext
 	{
