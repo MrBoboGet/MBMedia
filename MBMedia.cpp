@@ -8,6 +8,7 @@
 #include <iostream>
 #include <filesystem>
 #include <assert.h>
+#include <numeric>
 extern "C"
 {
 #include <ffmpeg/libavcodec/avcodec.h>
@@ -216,6 +217,66 @@ namespace MBMedia
 		m_TimeBase = NewTimebase;
 	}
 	//END StreamPacket
+	SampleFormatInfo s_SampleFormatInfoTable[] = 
+	{
+		{false,false,false,-1},
+		{ true,false,true,1 },
+		{true,true,true,4},
+		{true,false,false,sizeof(float)},
+		{true,false,false,sizeof(double)},
+
+		{false,false,true,1 },
+		{false,true,true,4},
+		{false,false,false,sizeof(float)},
+		{false,false,false,sizeof(double)},
+
+		{false,false,false,-1},
+	};
+	SampleFormatInfo GetSampleFormatInfo(SampleFormat FormatToInspect)
+	{
+		size_t FormatIndex = size_t(FormatToInspect)+ 1;
+		if(FormatIndex > size_t(SampleFormat::Null))
+		{
+			throw std::exception();
+		}
+		return(s_SampleFormatInfoTable[size_t(FormatToInspect) + 1]);
+	}
+	SampleFormat GetPlanarAudioFormat(SampleFormat FormatToConvert)
+	{
+		SampleFormat ReturnValue = SampleFormat::Null;
+		if (FormatToConvert == SampleFormat::Null || FormatToConvert == SampleFormat::NONE)
+		{
+			return(ReturnValue);
+		}
+		size_t FormatIndex = size_t(FormatToConvert);
+		if (FormatIndex <= 4)
+		{
+			ReturnValue = SampleFormat(FormatIndex + 5);
+		}
+		else
+		{
+			ReturnValue = FormatToConvert;
+		}
+		return(ReturnValue);
+	}
+	SampleFormat GetInterleavedAudioFormat(SampleFormat FormatToConvert)
+	{
+		SampleFormat ReturnValue = SampleFormat::Null;
+		if (FormatToConvert == SampleFormat::Null || FormatToConvert == SampleFormat::NONE)
+		{
+			return(ReturnValue);
+		}
+		size_t FormatIndex = size_t(FormatToConvert);
+		if (FormatIndex <= 4)
+		{
+			ReturnValue = FormatToConvert;
+		}
+		else
+		{
+			ReturnValue = SampleFormat(FormatIndex - 5);
+		}
+		return(ReturnValue);
+	}
 
 
 	//BEGIN ContainerDemuxer
@@ -272,15 +333,15 @@ namespace MBMedia
 		}
 		if (whence == SEEK_SET)
 		{
-			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(SeekCount);
+			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(SeekCount, whence);
 		}
 		if (whence == SEEK_CUR)
 		{
-			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(Demuxer->m_CostumIO->GetInputPosition() + SeekCount);
+			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(SeekCount, whence);
 		}
 		if (whence == SEEK_END)
-		{
-			ReturnValue = -1;
+		{	
+			ReturnValue = Demuxer->m_CostumIO->SetInputPosition(SeekCount, whence);
 		}
 		return(ReturnValue);
 	}
@@ -353,6 +414,10 @@ namespace MBMedia
 			return(StreamPacket(nullptr, { 0,0 }, MediaType::Null));
 		}
 	}
+	//bool ContainerDemuxer::Finished() const
+	//{
+	//	return(m_FileEnded);
+	//}
 	//END ContainerDemuxer
 
 	//BEGIN OutputContext
@@ -493,6 +558,17 @@ namespace MBMedia
 	{
 		throw std::exception();
 	}
+	AudioFrameInfo StreamFrame::GetAudioFrameInfo() const
+	{
+		if (m_InternalData == nullptr)
+		{
+			throw std::exception();
+		}
+		AudioFrameInfo ReturnValue;
+		AVFrame* FrameData = (AVFrame*)m_InternalData.get();
+		ReturnValue.NumberOfSamples = FrameData->nb_samples;
+		return(ReturnValue);
+	}
 	StreamFrame::StreamFrame(void* FFMPEGData,TimeBase FrameTimeBase,MediaType FrameType)
 	{
 		if (FFMPEGData != nullptr)
@@ -632,7 +708,22 @@ namespace MBMedia
 		AVAudioFifo* FFMPEGBuffer = (AVAudioFifo*)BufferToFree;
 		av_audio_fifo_free(FFMPEGBuffer);
 	}
-
+	void ConvertSampleData(const uint8_t** InputData, AudioParameters const& InputParameters, uint8_t** OutputBuffer, AudioParameters const& OutputParameters,size_t InputSamplesToConvert)
+	{
+		SwrContext* ConversionContext = swr_alloc_set_opts(NULL,
+			h_MBLayoutToFFMPEGLayout(OutputParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(OutputParameters.AudioFormat),
+			OutputParameters.SampleRate,
+			h_MBLayoutToFFMPEGLayout(InputParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(InputParameters.AudioFormat),
+			InputParameters.SampleRate,
+			0,
+			NULL);
+		size_t OutputSamples = (OutputParameters.SampleRate * InputSamplesToConvert) / (InputParameters.SampleRate);
+		int ConvertedSamples = swr_convert(ConversionContext, OutputBuffer, OutputSamples, InputData, InputSamplesToConvert);
+		swr_free(&ConversionContext);
+		assert(ConvertedSamples == OutputSamples);
+	}
 	//BEGIN AudioConverter
 	void swap(AudioConverter& LeftConverter, AudioConverter& RightConverter)
 	{
@@ -1247,6 +1338,7 @@ namespace MBMedia
 	{
 		//ContainerDemuxer InputData(InputFile);
 		ContainerDemuxer InputData(std::unique_ptr<MBUtility::MBFileInputStream>(new MBUtility::MBFileInputStream(InputFile)));
+		//ContainerDemuxer InputData(InputFile);
 		std::vector<StreamDecoder> Decoders = {};
 		OutputContext OutputData(OutputFile);
 		for (size_t i = 0; i < InputData.NumberOfStreams(); i++)

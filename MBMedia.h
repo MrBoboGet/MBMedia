@@ -52,6 +52,20 @@ namespace MBMedia
 
 		Null,
 	};
+	SampleFormat GetPlanarAudioFormat(SampleFormat FormatToConvert);
+	SampleFormat GetInterleavedAudioFormat(SampleFormat FormatToConvert);
+	
+	//förutsätter att outputten har korrekt mängd allokerade bytes
+
+
+	struct SampleFormatInfo
+	{
+		bool Interleaved = false;
+		bool Signed = false;
+		bool Integer = false;
+		size_t SampleSize = -1;
+	};
+	SampleFormatInfo GetSampleFormatInfo(SampleFormat FormatToInspect);
 	enum class ChannelLayout : int64_t
 	{
 
@@ -61,10 +75,14 @@ namespace MBMedia
 	{
 		ChannelLayout Layout = ChannelLayout::Null;
 		SampleFormat AudioFormat = SampleFormat::Null;
-		size_t SampleRate = -1;
+		uint64_t SampleRate = -1;
 		size_t NumberOfChannels = -1;
 		size_t FrameSize = -1;
 	};
+
+
+	//OBS Förutsätter att output datan är har utrymmer den behöver. Låg nivå konvertering. Kanske borde lägga till en Converssion context klass...
+	void ConvertSampleData(const uint8_t** InputData, AudioParameters const& InputParameters, uint8_t** OutputBuffer, AudioParameters const& OutputParameters,size_t SamplesToConvert);
 	//enum class VideoFormat
 	//{
 	//	Null
@@ -174,6 +192,10 @@ namespace MBMedia
 		MediaType GetType() { return(m_Type); }
 		//~StreamPacket();
 	};
+	struct AudioFrameInfo
+	{
+		size_t NumberOfSamples = -1;
+	};
 	class StreamFrame
 	{
 	private:
@@ -195,6 +217,9 @@ namespace MBMedia
 
 		VideoParameters GetVideoParameters() const;
 		AudioParameters GetAudioParameters() const;
+
+		AudioFrameInfo GetAudioFrameInfo() const;
+
 		uint8_t** GetData();
 	};
 	class AudioConverter
@@ -357,7 +382,7 @@ namespace MBMedia
 		size_t NumberOfStreams() { return(m_InputStreams.size()); }
 		StreamInfo const& GetStreamInfo(size_t StreamIndex);
 		StreamPacket GetNextPacket(size_t* StreamIndex);
-		//bool EndOfFile();
+		//bool Finished() const;
 
 		ContainerDemuxer(std::string const& InputFile);
 		ContainerDemuxer(std::unique_ptr<MBUtility::MBSearchableInputStream>&& InputStream);

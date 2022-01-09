@@ -4,3 +4,5 @@
 *.mkv
 /.vs/
 *.webm
+/MBPM_FileInfo
+/MBPM_FileInfo/
