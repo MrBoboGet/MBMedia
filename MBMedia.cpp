@@ -446,6 +446,10 @@ namespace MBMedia
 		AVStream* NewStream = avformat_new_stream(OutputFormatContext, EncoderCodec);
 		FFMPEGCall(avcodec_parameters_from_context(NewStream->codecpar, EncoderContext));
 	}
+	StreamEncoder const& OutputContext::GetOutputEncoder(size_t Index)
+	{
+		return(m_OutputEncoders[Index]);
+	}
 	void OutputContext::p_WritePacket(StreamPacket& PacketToWrite, size_t StreamIndex)
 	{
 		AVFormatContext* OutputFormat = (AVFormatContext*)m_InternalData.get();
@@ -1278,7 +1282,7 @@ namespace MBMedia
 	//END FrameConverter
 
 	//BEGIN StreamEncoder
-	TimeBase StreamEncoder::GetTimebase()
+	TimeBase StreamEncoder::GetTimebase() const
 	{
 		TimeBase ReturnValue;
 		if (m_InternalData.get() == nullptr)

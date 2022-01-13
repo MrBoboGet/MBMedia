@@ -369,7 +369,7 @@ namespace MBMedia
 		Codec m_Codec = Codec::Null;
 		TimeBase m_InputTimeBase;
 	public:
-		TimeBase GetTimebase();
+		TimeBase GetTimebase() const;
 		StreamEncoder(StreamEncoder const&) = delete;
 		StreamEncoder(StreamEncoder&&) noexcept = default;
 		StreamEncoder& operator=(StreamEncoder&&) = default;
@@ -386,7 +386,7 @@ namespace MBMedia
 		void Flush();
 		StreamPacket GetNextPacket();
 		
-		MediaType GetMediaType() { return(m_Type); };
+		MediaType GetMediaType() const { return(m_Type); };
 		//~StreamEncoder();
 	};
 	class ContainerDemuxer
@@ -428,6 +428,9 @@ namespace MBMedia
 
 		void AddOutputStream(StreamEncoder&& Encoder);
 		void WriteHeader();
+
+		StreamEncoder const& GetOutputEncoder(size_t EncoderIndex);
+		
 		
 		//ffmpeg verkar inte ha någon stream data i framen, kanske innebär att framen på något sätt är atomisk...
 		void InsertFrame(StreamFrame const& PacketToInsert, size_t StreamIndex);
