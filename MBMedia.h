@@ -77,7 +77,6 @@ namespace MBMedia
 		SampleFormat AudioFormat = SampleFormat::Null;
 		uint64_t SampleRate = -1;
 		size_t NumberOfChannels = -1;
-		size_t FrameSize = -1;
 	};
 
 
@@ -118,45 +117,42 @@ namespace MBMedia
 
 	struct VideoDecodeInfo
 	{
-
+		VideoParameters VideoInfo;
+		TimeBase StreamTimebase = { 0,0 };
+		int64_t AverageBitrate = -1;
 	};
+
 	struct VideoEncodeInfo
 	{
-	private:
-		uint32_t m_PixelFormat = -1;
-
 	public:
-		int height = 0;
-		int width = 0;
-		size_t bit_rate = 0;
-		size_t rc_buffer_size = 0;
-		size_t rc_max_rate = 0;
-		size_t rc_min_rate = 0;
-		TimeBase time_base;
+		VideoParameters VideoInfo;
+		TimeBase StreamTimebase = { 0,0 };
+		uint32_t TargetBitrate = 0;
+		//size_t rc_buffer_size = 0;
+		//size_t rc_max_rate = 0;
+		//size_t rc_min_rate = 0;
 	};
 
 	struct AudioDecodeInfo
 	{
-
+		AudioParameters AudioInfo;
+		TimeBase StreamTimebase = { 0,0 };
+		size_t FrameSize = -1;
+		int64_t AverageBitrate = -1;
 	};
 	struct AudioEncodeInfo
 	{
 	private:
-		friend 	VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy);
-		friend AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy);
 		friend class StreamEncoder;
-		int m_channels = -1;
-		int m_channels_layout = -1;
 	public:
-		size_t bit_rate = 0;
-		size_t rc_buffer_size = 0;
-		size_t rc_max_rate = 0;
-		size_t rc_min_rate = 0;
-		int sample_rate = 0;
-		TimeBase time_base = { 0,0 };
+		AudioParameters AudioInfo;
+		TimeBase StreamTimebase = { 0,0 };
+		uint32_t TargetBitrate = 0;
+		size_t FrameSize = -1;
+		//size_t rc_buffer_size = 0;
+		//size_t rc_max_rate = 0;
+		//size_t rc_min_rate = 0;
 	};
-	AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy);
-	VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy);
 	inline void _DoNothing(void*)
 	{
 		return;
@@ -189,7 +185,7 @@ namespace MBMedia
 		StreamPacket(StreamPacket const&) = delete;
 		StreamPacket(StreamPacket&&) = default;
 		StreamPacket& operator=(StreamPacket&&) = default;
-		MediaType GetType() { return(m_Type); }
+		MediaType GetType() const { return(m_Type); }
 		//~StreamPacket();
 	};
 	struct AudioFrameInfo
@@ -255,6 +251,7 @@ namespace MBMedia
 		AudioParameters m_NewAudioParameters;
 		AudioParameters m_OldAudioParameters;
 		TimeBase m_InputTimebase;
+		size_t m_NewFrameSize = -1;
 		//DEBUG
 		//ANTAGANDE varje input timestamp har monotont växande pts
 		int64_t DEBUG_LastTimestamp = 0;
@@ -265,7 +262,7 @@ namespace MBMedia
 		void p_ConvertNewFrame();
 		void p_FlushBufferedFrames();
 	public:
-		AudioConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters);
+		AudioConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters,size_t NewFrameSize);
 		void InsertFrame(StreamFrame const& FrameToInsert);
 		StreamFrame GetNextFrame();
 		void Flush();
@@ -307,7 +304,7 @@ namespace MBMedia
 
 		bool IsInitialised();
 
-		FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters,AudioParameters const& NewParameters);
+		FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters,AudioParameters const& NewParameters,size_t NewFrameSize);
 		FrameConverter(TimeBase InputTimebase,VideoParameters const& OldParameters, VideoParameters const& NewParameters);
 		void Flush();
 		void InsertFrame(StreamFrame const& FrameToInsert);
@@ -331,8 +328,6 @@ namespace MBMedia
 	{
 	private:
 		//void p_Flush();
-		friend AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy);
-		friend VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy);
 		std::shared_ptr<void> m_InternalData = nullptr;
 		MediaType m_Type = MediaType::Null;
 		TimeBase m_CodecTimebase;
@@ -344,10 +339,10 @@ namespace MBMedia
 		StreamFrame p_GetDecodedFrame();
 		FrameConverter m_FrameConverter;
 	public:
-		void SetAudioConversionParameters(AudioParameters const& ParametersToConvertTo);
+		void SetAudioConversionParameters(AudioParameters const& ParametersToConvertTo,size_t NewFrameSize);
 		void SetVideoConversionParameters(VideoParameters const& ParametersToConvertTo);
-		AudioParameters GetAudioParameters() const;
-		VideoParameters GetVideoParameters() const;
+		AudioDecodeInfo GetAudioDecodeInfo() const;
+		VideoDecodeInfo GetVideoDecodeInfo() const;
 
 		TimeBase GetCodecTimebase() const { return(m_CodecTimebase); };
 		TimeBase GetStreamTimebase() const { return(m_CodecTimebase); };
@@ -355,6 +350,8 @@ namespace MBMedia
 		StreamDecoder(StreamDecoder&&) = default;
 		StreamDecoder& operator=(StreamDecoder&&) = default;
 		
+		MediaType GetType() const { return(m_Type); };
+
 		StreamDecoder(StreamInfo const& StreamToDecode);//implicit antagande här, att decoda en stream kan göras "korrekt", att omvandla eller omtolka datan bör göras från framesen vi får efter
 
 		void InsertPacket(StreamPacket const& PacketToDecode);
@@ -377,11 +374,13 @@ namespace MBMedia
 		StreamEncoder(StreamEncoder&&) noexcept = default;
 		StreamEncoder& operator=(StreamEncoder&&) = default;
 
+		StreamEncoder(Codec StreamType, VideoDecodeInfo const& EncodeInfo);
+		StreamEncoder(Codec StreamType, AudioDecodeInfo const& EncodeInfo);
 		StreamEncoder(Codec StreamType, AudioEncodeInfo const& EncodeInfo);
 		StreamEncoder(Codec StreamType, VideoEncodeInfo const& EncodeInfo);
 
-		AudioParameters GetAudioParameters() const;
-		VideoParameters GetVideoParameters() const;
+		AudioEncodeInfo GetAudioEncodeInfo() const;
+		VideoEncodeInfo GetVideoEncodeInfo() const;
 
 		void InsertFrame(StreamFrame const& FrameToEncode);
 		void Flush();
@@ -433,14 +432,6 @@ namespace MBMedia
 		//ffmpeg verkar inte ha någon stream data i framen, kanske innebär att framen på något sätt är atomisk...
 		void InsertFrame(StreamFrame const& PacketToInsert, size_t StreamIndex);
 		void Finalize();
-	};
-
-
-	class MediaStreamer
-	{
-	private:
-	public:
-
 	};
 	MediaType GetCodecMediaType(Codec InputCodec);
 	void Transcode(std::string const& InputFile, std::string const& OutputFile,Codec NewAudioCodec,Codec NewVideoCodec);

@@ -566,7 +566,6 @@ namespace MBMedia
 		ReturnValue.NumberOfChannels = FFMPEGData->channels;
 		ReturnValue.AudioFormat = h_FFMPEGAudioFormatToMBFormat((AVSampleFormat) FFMPEGData->format);
 		ReturnValue.Layout = ChannelLayout::Null;
-		ReturnValue.FrameSize = -1;//TODO fixa så det här faktiskt fungerar
 		return(ReturnValue);
 	}
 	AudioFrameInfo StreamFrame::GetAudioFrameInfo() const
@@ -598,32 +597,38 @@ namespace MBMedia
 		AVCodecContext* CodecContext = (AVCodecContext*)PointerToFree;
 		avcodec_free_context(&CodecContext);
 	}
-	void StreamDecoder::SetAudioConversionParameters(AudioParameters const& NewParameters)
+	void StreamDecoder::SetAudioConversionParameters(AudioParameters const& NewParameters,size_t NewFrameSize)
 	{
-		m_FrameConverter = FrameConverter(m_StreamTimebase,GetAudioParameters(), NewParameters);
+		m_FrameConverter = FrameConverter(m_StreamTimebase,GetAudioDecodeInfo().AudioInfo, NewParameters,NewFrameSize);
 	}
 	void StreamDecoder::SetVideoConversionParameters(VideoParameters const& NewParameters)
 	{
-		m_FrameConverter = FrameConverter(m_StreamTimebase, GetVideoParameters(), NewParameters);
+		m_FrameConverter = FrameConverter(m_StreamTimebase, GetVideoDecodeInfo().VideoInfo, NewParameters);
 	}
-	AudioParameters StreamDecoder::GetAudioParameters() const
+	AudioDecodeInfo StreamDecoder::GetAudioDecodeInfo() const
 	{
-		AudioParameters ReturnValue;
+		AudioDecodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
-		ReturnValue.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
-		ReturnValue.SampleRate = CodecContext->sample_rate;
-		ReturnValue.NumberOfChannels = CodecContext->channels;
+		ReturnValue.AudioInfo.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
+		ReturnValue.AudioInfo.SampleRate = CodecContext->sample_rate;
+		ReturnValue.AudioInfo.NumberOfChannels = CodecContext->channels;
+		ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
 		ReturnValue.FrameSize = CodecContext->frame_size;
-		ReturnValue.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		ReturnValue.AverageBitrate = CodecContext->bit_rate;
+		ReturnValue.StreamTimebase = GetStreamTimebase();
+
+		ReturnValue.StreamTimebase = this->GetStreamTimebase();//ganska trassligt, kommer inte ihåg varför jag har 2 stycken...
 		return(ReturnValue);
 	}
-	VideoParameters StreamDecoder::GetVideoParameters() const
+	VideoDecodeInfo StreamDecoder::GetVideoDecodeInfo() const
 	{
-		VideoParameters ReturnValue;
+		VideoDecodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
-		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
-		ReturnValue.Width = CodecContext->width;
-		ReturnValue.Height = CodecContext->height;
+		ReturnValue.VideoInfo.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.VideoInfo.Width = CodecContext->width;
+		ReturnValue.VideoInfo.Height = CodecContext->height;
+		ReturnValue.AverageBitrate = CodecContext->bit_rate;
+		ReturnValue.StreamTimebase = GetStreamTimebase();
 		return(ReturnValue);
 	}
 	StreamDecoder::StreamDecoder(StreamInfo const& StreamToDecode)
@@ -653,6 +658,10 @@ namespace MBMedia
 	}
 	void StreamDecoder::InsertPacket(StreamPacket const& PacketToDecode)
 	{
+		if (PacketToDecode.GetType() != GetType())
+		{
+			throw std::exception();
+		}
 		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
 		const AVPacket* PacketToInsert = (const AVPacket*)PacketToDecode.m_InternalData.get();
 		FFMPEGCall(avcodec_send_packet(CodecContext, (const AVPacket*)PacketToDecode.m_InternalData.get()));
@@ -698,6 +707,10 @@ namespace MBMedia
 	}
 	void StreamDecoder::Flush()
 	{
+		if (m_Flushing)
+		{
+			return;
+		}
 		m_Flushing = true;
 		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
 		FFMPEGCall(avcodec_send_packet(CodecContext, nullptr));
@@ -748,7 +761,7 @@ namespace MBMedia
 		std::swap(LeftConverter.m_FirstTimestampSet, RightConverter.m_FirstTimestampSet);
 		std::swap(LeftConverter.m_InputTimebase, RightConverter.m_InputTimebase);
 	}
-	AudioConverter::AudioConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters)
+	AudioConverter::AudioConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters,size_t NewFrameSize)
 	{
 		m_InputTimebase = InputTimebase;
 		m_NewAudioParameters = NewParameters;
@@ -762,12 +775,13 @@ namespace MBMedia
 			OldParameters.SampleRate,
 			0,
 			NULL);
+		m_NewFrameSize = NewFrameSize;
 		FFMPEGCall(swr_init(ConversionContext));
 
 		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwrContext);
 		//FIFO Buffer
 		//TODO fix cases of output frame_size = 0 or input fram_size = 0
-		AVAudioFifo* AudioBuffer = av_audio_fifo_alloc(h_MBSampleFormatToFFMPEGSampleFormat(OldParameters.AudioFormat), OldParameters.NumberOfChannels, NewParameters.FrameSize * 2);
+		AVAudioFifo* AudioBuffer = av_audio_fifo_alloc(h_MBSampleFormatToFFMPEGSampleFormat(OldParameters.AudioFormat), OldParameters.NumberOfChannels, m_NewFrameSize * 2);
 		m_AudioDataBuffer = std::unique_ptr<void, void(*)(void*)>(AudioBuffer, _FreeAudioFifo);
 	}
 	AVFrame* h_GetFFMPEGFrame(AudioParameters const& AssociatedParameters, size_t NumberOfSamples)
@@ -792,10 +806,10 @@ namespace MBMedia
 	}
 	void AudioConverter::p_ConvertNewFrame()
 	{
-		AVFrame* ConvertedFrame = h_GetFFMPEGFrame(m_NewAudioParameters, m_NewAudioParameters.FrameSize);
+		AVFrame* ConvertedFrame = h_GetFFMPEGFrame(m_NewAudioParameters, m_NewFrameSize);
 
 		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioDataBuffer.get();
-		size_t InputFrameSize = m_NewAudioParameters.FrameSize;
+		size_t InputFrameSize = m_NewFrameSize;
 		if (InputFrameSize > av_audio_fifo_size(AudioBuffer))
 		{
 			InputFrameSize = av_audio_fifo_size(AudioBuffer);
@@ -846,7 +860,7 @@ namespace MBMedia
 		size_t FlushedSamples = 0;
 		while (true)
 		{
-			AVFrame* NewFrame = h_GetFFMPEGFrame(m_NewAudioParameters, m_NewAudioParameters.FrameSize);
+			AVFrame* NewFrame = h_GetFFMPEGFrame(m_NewAudioParameters, m_NewFrameSize);
 			FlushedSamples = swr_convert(ConversionContext, NewFrame->data, NewFrame->nb_samples, NULL, 0);
 			if (FlushedSamples < 0)
 			{
@@ -864,7 +878,7 @@ namespace MBMedia
 				NewFrame->nb_samples = FlushedSamples;
 				m_StoredFrames.push(std::move(StreamFrame(NewFrame, m_InputTimebase, MediaType::Audio)));	
 			}
-			if (FlushedSamples < m_NewAudioParameters.FrameSize || FlushedSamples == 0)
+			if (FlushedSamples < m_NewFrameSize || FlushedSamples == 0)
 			{
 				break;
 			}
@@ -880,7 +894,7 @@ namespace MBMedia
 			m_FirstTimestampSet = true;
 		}
 		av_audio_fifo_write(AudioBuffer, (void**)InputFrame->data, InputFrame->nb_samples);
-		while (av_audio_fifo_size(AudioBuffer) >= m_NewAudioParameters.FrameSize)
+		while (av_audio_fifo_size(AudioBuffer) >= m_NewFrameSize)
 		{
 			p_ConvertNewFrame();
 		}
@@ -963,7 +977,7 @@ namespace MBMedia
 	StreamFrame AudioToFrameConverter::GetNextFrame()
 	{
 		StreamFrame ReturnValue;
-		if (m_StoredFrames.size() >= 0)
+		if (m_StoredFrames.size() > 0)
 		{
 			ReturnValue = std::move(m_StoredFrames.front());
 			m_StoredFrames.pop_front();
@@ -1173,10 +1187,10 @@ namespace MBMedia
 			return(m_VideoConverter->GetNextFrame());
 		}
 	}
-	FrameConverter::FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters, AudioParameters const& NewParameters)
+	FrameConverter::FrameConverter(TimeBase InputTimebase,AudioParameters const& OldParameters, AudioParameters const& NewParameters,size_t NewFrameSize)
 	{
 		m_Type = MediaType::Audio;
-		m_AudioConverter = std::unique_ptr<AudioConverter>(new AudioConverter(InputTimebase, OldParameters, NewParameters));
+		m_AudioConverter = std::unique_ptr<AudioConverter>(new AudioConverter(InputTimebase, OldParameters, NewParameters,NewFrameSize));
 	}
 	FrameConverter::FrameConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters)
 	{
@@ -1279,33 +1293,37 @@ namespace MBMedia
 	//{
 	//	avcodec_free_context((AVCodecContext**)&CodecToFree);
 	//}
-	VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy)
-	{
-		VideoEncodeInfo ReturnValue;
-		ReturnValue.bit_rate		= 2 * 1000 * 1000;
-		ReturnValue.rc_buffer_size	= 4 * 1000 * 10000;
-		ReturnValue.rc_max_rate		= 2 * 1000 * 10000;
-		ReturnValue.rc_min_rate		= 2.5 * 1000 * 100;
-		//
-		AVCodecContext* CodecContextToCopy = (AVCodecContext*)StreamToCopy.m_InternalData.get();
-		ReturnValue.height = CodecContextToCopy->height;
-		ReturnValue.width = CodecContextToCopy->width;
-		ReturnValue.time_base = StreamToCopy.GetCodecTimebase();
-		return(ReturnValue);
-	}
-	StreamEncoder::StreamEncoder(Codec StreamType, VideoEncodeInfo const& EncodeInfo)
+	//VideoEncodeInfo GetVideoEncodePresets(StreamDecoder const& StreamToCopy)
+	//{
+	//	VideoEncodeInfo ReturnValue;
+	//	ReturnValue.bit_rate		= 2 * 1000 * 1000;
+	//	ReturnValue.rc_buffer_size	= 4 * 1000 * 10000;
+	//	ReturnValue.rc_max_rate		= 2 * 1000 * 10000;
+	//	ReturnValue.rc_min_rate		= 2.5 * 1000 * 100;
+	//	//
+	//	AVCodecContext* CodecContextToCopy = (AVCodecContext*)StreamToCopy.m_InternalData.get();
+	//	ReturnValue.height = CodecContextToCopy->height;
+	//	ReturnValue.width = CodecContextToCopy->width;
+	//	ReturnValue.time_base = StreamToCopy.GetCodecTimebase();
+	//	return(ReturnValue);
+	//}
+	StreamEncoder::StreamEncoder(Codec StreamType, VideoDecodeInfo const& EncodeInfo)
 	{
 		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
 		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
 		AVCodecContext* VideoEncodeContext = avcodec_alloc_context3(FFMpegCodec);
 
-		VideoEncodeContext->height			= EncodeInfo.height;
-		VideoEncodeContext->width			= EncodeInfo.width;
-		VideoEncodeContext->bit_rate		= EncodeInfo.bit_rate;
-		VideoEncodeContext->rc_buffer_size	= EncodeInfo.rc_buffer_size;
-		VideoEncodeContext->rc_max_rate		= EncodeInfo.rc_max_rate;
-		VideoEncodeContext->rc_min_rate		= EncodeInfo.rc_min_rate;
-		VideoEncodeContext->time_base		= { EncodeInfo.time_base.num,EncodeInfo.time_base.den };
+		VideoEncodeContext->height = EncodeInfo.VideoInfo.Height;
+		VideoEncodeContext->width = EncodeInfo.VideoInfo.Width;
+		VideoEncodeContext->bit_rate = EncodeInfo.AverageBitrate;
+		if (VideoEncodeContext->bit_rate == 0)
+		{
+			VideoEncodeContext->bit_rate = 2 * 1000 * 1000;
+		}
+		VideoEncodeContext->rc_buffer_size = 4 * 1000 * 10000;
+		VideoEncodeContext->rc_max_rate = 2 * 1000 * 10000;
+		VideoEncodeContext->rc_min_rate = 2.5 * 1000 * 100;
+		VideoEncodeContext->time_base = { EncodeInfo.StreamTimebase.num,EncodeInfo.StreamTimebase.den };
 		size_t Offset = 0;
 		AVPixelFormat FormatToUse = FFMpegCodec->pix_fmts[Offset];
 		//while (FFMpegCodec->pix_fmts[Offset] != -1)
@@ -1319,39 +1337,26 @@ namespace MBMedia
 		m_InternalData = std::unique_ptr<void, void (*)(void*)>(VideoEncodeContext, _FreeCodecContext);
 		m_Type = MediaType::Video;
 	}
-	AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy)
-	{
-		AudioEncodeInfo ReturnValue;
-		ReturnValue.bit_rate		=  2 * 1000 * 10000;
-		ReturnValue.rc_buffer_size	=  4 * 1000 * 10000;
-		ReturnValue.rc_max_rate		=  2 * 10000 * 100000;
-		ReturnValue.rc_min_rate		=  2.5 * 100 * 100;
-		//
-		AVCodecContext* CodecContextToCopy = (AVCodecContext*)StreamToCopy.m_InternalData.get();
-		ReturnValue.time_base = StreamToCopy.GetCodecTimebase();
-		ReturnValue.m_channels = CodecContextToCopy->channels;
-		ReturnValue.m_channels_layout = CodecContextToCopy->channel_layout;
-		ReturnValue.sample_rate = CodecContextToCopy->sample_rate;
-		//
-		return(ReturnValue);
-		//avcodec_parameters_from_context
-	}
-	StreamEncoder::StreamEncoder(Codec StreamType, AudioEncodeInfo const& EncodeInfo)
+	StreamEncoder::StreamEncoder(Codec StreamType, AudioDecodeInfo const& EncodeInfo)
 	{
 		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
 		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
 		AVCodecContext* AudioEncodeContext = avcodec_alloc_context3(FFMpegCodec);
-		AudioEncodeContext->bit_rate		= EncodeInfo.bit_rate;
-		AudioEncodeContext->rc_buffer_size	= EncodeInfo.rc_buffer_size;
-		AudioEncodeContext->rc_max_rate		= EncodeInfo.rc_max_rate;
-		AudioEncodeContext->rc_min_rate		= EncodeInfo.rc_min_rate;
+		AudioEncodeContext->bit_rate = EncodeInfo.AverageBitrate;
+		if (AudioEncodeContext->bit_rate == 0)
+		{
+			AudioEncodeContext->bit_rate = 2 * 1000 * 1000;
+		}
+		AudioEncodeContext->rc_buffer_size = 4 * 1000 * 10000;
+		AudioEncodeContext->rc_max_rate = 2 * 1000 * 10000;
+		AudioEncodeContext->rc_min_rate = 2.5 * 1000 * 100;
 		//
-		AudioEncodeContext->time_base		= { EncodeInfo.time_base.num,EncodeInfo.time_base.den };
+		AudioEncodeContext->time_base = { EncodeInfo.StreamTimebase.num,EncodeInfo.StreamTimebase.den };
 		//AudioEncodeContext->sample_fmt		=(AVSampleFormat) EncodeInfo.m_SampleFormat;
-		AudioEncodeContext->channels		= EncodeInfo.m_channels;
-		AudioEncodeContext->channel_layout	= EncodeInfo.m_channels_layout;
+		AudioEncodeContext->channels = EncodeInfo.AudioInfo.NumberOfChannels;
+		AudioEncodeContext->channel_layout = h_MBLayoutToFFMPEGLayout(EncodeInfo.AudioInfo.Layout);
 		//sample rate vad det nu betyder wtf
-		AudioEncodeContext->sample_rate		= EncodeInfo.sample_rate;
+		AudioEncodeContext->sample_rate = EncodeInfo.AudioInfo.SampleRate;
 
 		AudioEncodeContext->sample_fmt = FFMpegCodec->sample_fmts[0];
 
@@ -1359,24 +1364,94 @@ namespace MBMedia
 		m_InternalData = std::unique_ptr<void, void (*)(void*)>(AudioEncodeContext, _FreeCodecContext);
 		m_Type = MediaType::Audio;
 	}
-	AudioParameters StreamEncoder::GetAudioParameters() const
+	StreamEncoder::StreamEncoder(Codec StreamType, VideoEncodeInfo const& EncodeInfo)
 	{
-		AudioParameters ReturnValue;
+		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
+		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		AVCodecContext* VideoEncodeContext = avcodec_alloc_context3(FFMpegCodec);
+
+		VideoEncodeContext->height			= EncodeInfo.VideoInfo.Height;
+		VideoEncodeContext->width			= EncodeInfo.VideoInfo.Width;
+		VideoEncodeContext->bit_rate		= EncodeInfo.TargetBitrate;
+		VideoEncodeContext->rc_buffer_size	= 4 * 1000 * 10000;
+		VideoEncodeContext->rc_max_rate		= 2 * 1000 * 10000;
+		VideoEncodeContext->rc_min_rate		= 2.5 * 1000 * 100;
+		VideoEncodeContext->time_base		= { EncodeInfo.StreamTimebase.num,EncodeInfo.StreamTimebase.den };
+		size_t Offset = 0;
+		AVPixelFormat FormatToUse = FFMpegCodec->pix_fmts[Offset];
+		//while (FFMpegCodec->pix_fmts[Offset] != -1)
+		//{
+		//	FormatToUse = FFMpegCodec->pix_fmts[Offset];
+		//	Offset += 1;
+		//}
+		VideoEncodeContext->pix_fmt = FormatToUse;
+
+		FFMPEGCall(avcodec_open2(VideoEncodeContext, FFMpegCodec, NULL));
+		m_InternalData = std::unique_ptr<void, void (*)(void*)>(VideoEncodeContext, _FreeCodecContext);
+		m_Type = MediaType::Video;
+	}
+	//AudioEncodeInfo GetAudioEncodePresets(StreamDecoder const& StreamToCopy)
+	//{
+	//	AudioEncodeInfo ReturnValue;
+	//	ReturnValue.bit_rate		=  2 * 1000 * 10000;
+	//	ReturnValue.rc_buffer_size	=  4 * 1000 * 10000;
+	//	ReturnValue.rc_max_rate		=  2 * 10000 * 100000;
+	//	ReturnValue.rc_min_rate		=  2.5 * 100 * 100;
+	//	//
+	//	AVCodecContext* CodecContextToCopy = (AVCodecContext*)StreamToCopy.m_InternalData.get();
+	//	ReturnValue.time_base = StreamToCopy.GetCodecTimebase();
+	//	ReturnValue.m_channels = CodecContextToCopy->channels;
+	//	ReturnValue.m_channels_layout = CodecContextToCopy->channel_layout;
+	//	ReturnValue.sample_rate = CodecContextToCopy->sample_rate;
+	//	//
+	//	return(ReturnValue);
+	//	//avcodec_parameters_from_context
+	//}
+	StreamEncoder::StreamEncoder(Codec StreamType, AudioEncodeInfo const& EncodeInfo)
+	{
+		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
+		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		AVCodecContext* AudioEncodeContext = avcodec_alloc_context3(FFMpegCodec);
+		AudioEncodeContext->bit_rate		= EncodeInfo.TargetBitrate;
+		AudioEncodeContext->rc_buffer_size	= 4 * 1000 * 10000;
+		AudioEncodeContext->rc_max_rate		= 2 * 1000 * 10000;
+		AudioEncodeContext->rc_min_rate		= 2.5 * 1000 * 100;
+		//
+		AudioEncodeContext->time_base		= { EncodeInfo.StreamTimebase.num,EncodeInfo.StreamTimebase.den };
+		//AudioEncodeContext->sample_fmt		=(AVSampleFormat) EncodeInfo.m_SampleFormat;
+		AudioEncodeContext->channels		= EncodeInfo.AudioInfo.NumberOfChannels;
+		AudioEncodeContext->channel_layout	= h_MBLayoutToFFMPEGLayout(EncodeInfo.AudioInfo.Layout);
+		//sample rate vad det nu betyder wtf
+		AudioEncodeContext->sample_rate		= EncodeInfo.AudioInfo.SampleRate;
+
+		AudioEncodeContext->sample_fmt = FFMpegCodec->sample_fmts[0];
+
+		avcodec_open2(AudioEncodeContext, FFMpegCodec, NULL);
+		m_InternalData = std::unique_ptr<void, void (*)(void*)>(AudioEncodeContext, _FreeCodecContext);
+		m_Type = MediaType::Audio;
+	}
+	AudioEncodeInfo StreamEncoder::GetAudioEncodeInfo() const
+	{
+		AudioEncodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
-		ReturnValue.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
-		ReturnValue.SampleRate = CodecContext->sample_rate;
-		ReturnValue.NumberOfChannels = CodecContext->channels;
+		ReturnValue.AudioInfo.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
+		ReturnValue.AudioInfo.SampleRate = CodecContext->sample_rate;
+		ReturnValue.AudioInfo.NumberOfChannels = CodecContext->channels;
 		ReturnValue.FrameSize = CodecContext->frame_size;
-		ReturnValue.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		ReturnValue.TargetBitrate = CodecContext->bit_rate;
+		ReturnValue.StreamTimebase = { CodecContext->time_base.num,CodecContext->time_base.den };
 		return(ReturnValue);
 	}
-	VideoParameters StreamEncoder::GetVideoParameters() const
+	VideoEncodeInfo StreamEncoder::GetVideoEncodeInfo() const
 	{
-		VideoParameters ReturnValue;
+		VideoEncodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
-		ReturnValue.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
-		ReturnValue.Width = CodecContext->width;
-		ReturnValue.Height = CodecContext->height;
+		ReturnValue.VideoInfo.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.VideoInfo.Width = CodecContext->width;
+		ReturnValue.VideoInfo.Height = CodecContext->height;
+		ReturnValue.TargetBitrate = CodecContext->bit_rate;
+		ReturnValue.StreamTimebase = { CodecContext->time_base.num,CodecContext->time_base.den };
 		return(ReturnValue);
 	}
 	void StreamEncoder::InsertFrame(StreamFrame const& FrameToEncode)
@@ -1428,15 +1503,15 @@ namespace MBMedia
 			if (InputData.GetStreamInfo(i).GetMediaType() == MediaType::Audio)
 			{
 				Decoders.push_back(StreamDecoder(InputData.GetStreamInfo(i)));
-				StreamEncoder NewStreamEncoder = StreamEncoder(NewAudioCodec, GetAudioEncodePresets(Decoders.back()));
-				Decoders.back().SetAudioConversionParameters(NewStreamEncoder.GetAudioParameters());
+				StreamEncoder NewStreamEncoder = StreamEncoder(NewAudioCodec, Decoders.back().GetAudioDecodeInfo());
+				Decoders.back().SetAudioConversionParameters(NewStreamEncoder.GetAudioEncodeInfo().AudioInfo, NewStreamEncoder.GetAudioEncodeInfo().FrameSize);
 				OutputData.AddOutputStream(std::move(NewStreamEncoder));
 			}
 			if (InputData.GetStreamInfo(i).GetMediaType() == MediaType::Video)
 			{
 				Decoders.push_back(StreamDecoder(InputData.GetStreamInfo(i)));
-				StreamEncoder NewStreamEncoder = StreamEncoder(NewVideoCodec, GetVideoEncodePresets(Decoders.back()));
-				Decoders.back().SetVideoConversionParameters(NewStreamEncoder.GetVideoParameters());
+				StreamEncoder NewStreamEncoder = StreamEncoder(NewVideoCodec, Decoders.back().GetVideoDecodeInfo());
+				Decoders.back().SetVideoConversionParameters(NewStreamEncoder.GetVideoEncodeInfo().VideoInfo);
 				OutputData.AddOutputStream(std::move(NewStreamEncoder));
 			}
 		}
