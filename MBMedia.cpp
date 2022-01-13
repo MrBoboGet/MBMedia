@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include "MBMedia.h"
 #ifdef _WIN32
 #include <unknwn.h>
@@ -220,12 +221,15 @@ namespace MBMedia
 	SampleFormatInfo s_SampleFormatInfoTable[] = 
 	{
 		{false,false,false,-1},
+
 		{ true,false,true,1 },
+		{ true,false,true,2 },
 		{true,true,true,4},
 		{true,false,false,sizeof(float)},
 		{true,false,false,sizeof(double)},
 
 		{false,false,true,1 },
+		{ false,false,true,2 },
 		{false,true,true,4},
 		{false,false,false,sizeof(float)},
 		{false,false,false,sizeof(double)},
@@ -239,7 +243,7 @@ namespace MBMedia
 		{
 			throw std::exception();
 		}
-		return(s_SampleFormatInfoTable[size_t(FormatToInspect) + 1]);
+		return(s_SampleFormatInfoTable[FormatIndex]);
 	}
 	SampleFormat GetPlanarAudioFormat(SampleFormat FormatToConvert)
 	{
@@ -556,7 +560,14 @@ namespace MBMedia
 	}
 	AudioParameters StreamFrame::GetAudioParameters() const
 	{
-		throw std::exception();
+		const AVFrame* FFMPEGData = (const AVFrame*)m_InternalData.get();
+		AudioParameters ReturnValue;
+		ReturnValue.SampleRate = FFMPEGData->sample_rate;
+		ReturnValue.NumberOfChannels = FFMPEGData->channels;
+		ReturnValue.AudioFormat = h_FFMPEGAudioFormatToMBFormat((AVSampleFormat) FFMPEGData->format);
+		ReturnValue.Layout = ChannelLayout::Null;
+		ReturnValue.FrameSize = -1;//TODO fixa så det här faktiskt fungerar
+		return(ReturnValue);
 	}
 	AudioFrameInfo StreamFrame::GetAudioFrameInfo() const
 	{
@@ -719,6 +730,7 @@ namespace MBMedia
 			InputParameters.SampleRate,
 			0,
 			NULL);
+		swr_init(ConversionContext);
 		size_t OutputSamples = (OutputParameters.SampleRate * InputSamplesToConvert) / (InputParameters.SampleRate);
 		int ConvertedSamples = swr_convert(ConversionContext, OutputBuffer, OutputSamples, InputData, InputSamplesToConvert);
 		swr_free(&ConversionContext);
@@ -890,6 +902,76 @@ namespace MBMedia
 	}
 
 	//END AudioConverter
+
+	//BEGIN AudioToFrameConverter
+	AudioToFrameConverter::AudioToFrameConverter(AudioParameters const& InputParameters, int64_t InitialTimestamp, TimeBase OutputTimebase, size_t FrameSize)
+	{
+		m_FrameParameters = InputParameters;
+		m_OutputTimebase = OutputTimebase;
+		m_CurrentTimeStamp = InitialTimestamp;
+		m_FrameSize = FrameSize;
+		AVAudioFifo* AudioBuffer = av_audio_fifo_alloc(h_MBSampleFormatToFFMPEGSampleFormat(InputParameters.AudioFormat), InputParameters.NumberOfChannels, FrameSize * 2);
+		m_AudioFifoBuffer = std::unique_ptr<void, void(*)(void*)>(AudioBuffer, _FreeAudioFifo);
+	}
+	void AudioToFrameConverter::InsertAudioData(const uint8_t* const* AudioData, size_t NumberOfSamples)
+	{
+		//Borde inte hända men men
+		if (m_AudioFifoBuffer == nullptr || m_Flushed)
+		{
+			throw std::exception();
+		}
+		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioFifoBuffer.get();
+		//lite bruh att det inte är const pointer?
+		av_audio_fifo_write(AudioBuffer,(void**) AudioData, NumberOfSamples);
+		while (av_audio_fifo_size(AudioBuffer) > NumberOfSamples)
+		{
+			p_ConvertStoredSamples();
+		}
+	}
+	void AudioToFrameConverter::p_ConvertStoredSamples()
+	{
+		//Borde inte hända men men
+		if (m_AudioFifoBuffer == nullptr)
+		{
+			throw std::exception();
+		}
+		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioFifoBuffer.get();
+		size_t SamplesToExtract = std::min((size_t)av_audio_fifo_size(AudioBuffer), m_FrameSize);
+		AVFrame* NewFrame = h_GetFFMPEGFrame(m_FrameParameters, SamplesToExtract);
+		FFMPEGCall(av_audio_fifo_read(AudioBuffer, (void**)NewFrame->data, NewFrame->nb_samples));
+		NewFrame->pts = m_CurrentTimeStamp;
+		NewFrame->pkt_dts = m_CurrentTimeStamp;
+		NewFrame->pkt_pts = m_CurrentTimeStamp;
+		int64_t  TimestampIncrease = (SamplesToExtract * m_OutputTimebase.den) / (m_OutputTimebase.num * m_FrameParameters.SampleRate);
+		m_CurrentTimeStamp += TimestampIncrease;
+		m_StoredFrames.push_back(StreamFrame(NewFrame, m_OutputTimebase, MediaType::Audio));
+	}
+	void AudioToFrameConverter::Flush()
+	{
+		if (m_AudioFifoBuffer == nullptr)
+		{
+			throw std::exception();
+		}
+		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioFifoBuffer.get();
+		//gör inget mer än att man kan extrahera sista framen även om den inte är stor nog
+		while (av_audio_fifo_size(AudioBuffer) > 0)
+		{
+			p_ConvertStoredSamples();
+		}
+		m_Flushed = true;
+	}
+	StreamFrame AudioToFrameConverter::GetNextFrame()
+	{
+		StreamFrame ReturnValue;
+		if (m_StoredFrames.size() >= 0)
+		{
+			ReturnValue = std::move(m_StoredFrames.front());
+			m_StoredFrames.pop_front();
+		}
+		return(ReturnValue);
+	}
+	//END AudioToFrameConverter
+
 
 	//BEGIN VideoConverter
 	void _FreeSwsContext(void* ContextToFree)

@@ -208,8 +208,8 @@ namespace MBMedia
 		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
 		MediaType m_MediaType = MediaType::Null;
 		TimeBase m_TimeBase;
-		StreamFrame(void* FFMPEGData,TimeBase FrameTimeBase,MediaType FrameType);
 	public:
+		StreamFrame(void* FFMPEGData, TimeBase FrameTimeBase, MediaType FrameType);
 		StreamFrame();
 		int64_t GetPresentationTime() const;
 		TimeBase GetTimeBase()const {return(m_TimeBase);};
@@ -221,6 +221,29 @@ namespace MBMedia
 		AudioFrameInfo GetAudioFrameInfo() const;
 
 		uint8_t** GetData();
+	};
+	class AudioToFrameConverter
+	{
+	private:
+		AudioParameters m_FrameParameters;
+		TimeBase m_OutputTimebase;
+		size_t m_FrameSize = 0;
+		int64_t m_CurrentTimeStamp = 0;
+		std::unique_ptr<void, void (*)(void*)> m_AudioFifoBuffer = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
+		std::deque<StreamFrame> m_StoredFrames = {};
+		void p_ConvertStoredSamples();
+		bool m_Flushed = false;
+	public:
+		AudioToFrameConverter(AudioParameters const& InputParameters,int64_t InitialTimestamp,TimeBase OutputTimebase, size_t FrameSize);
+		void InsertAudioData(const uint8_t*const*,size_t FrameSize);
+		void Flush();
+		StreamFrame GetNextFrame();
+	};
+	class VideoFrameConverter
+	{
+	private:
+
+	public:
 	};
 	class AudioConverter
 	{
