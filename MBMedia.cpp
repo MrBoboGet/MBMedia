@@ -921,6 +921,87 @@ namespace MBMedia
 
 	//END AudioConverter
 
+	//BEGIN AudioFIFOBuffer
+	void AudioFIFOBuffer::Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples)
+	{
+		m_IsInitialized = true;
+		m_InputFormatInfo = MBMedia::GetSampleFormatInfo(InputParameters.AudioFormat);
+		m_InputParameters = InputParameters;
+		m_InternalBuffers = std::vector<std::vector<uint8_t>>(InputParameters.NumberOfChannels, std::vector<uint8_t>(InitialNumberOfSamples * m_InputFormatInfo.SampleSize, 0));
+	}
+	AudioFIFOBuffer::AudioFIFOBuffer(AudioParameters const& InputParameters, size_t InitialNumberOfSamples)
+	{
+		Initialize(InputParameters, InitialNumberOfSamples);
+	}
+	size_t AudioFIFOBuffer::p_GetChannelFrameSize()
+	{
+		if (m_InputFormatInfo.Interleaved)
+		{
+			return(m_InputFormatInfo.SampleSize * m_InputParameters.NumberOfChannels);
+		}
+		else
+		{
+			return(m_InputFormatInfo.SampleSize);
+		}
+	}
+	void AudioFIFOBuffer::InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples)
+	{
+		if (!m_IsInitialized)
+		{
+			throw std::exception();
+		}
+		size_t NewSamplesSize = NumberOfSamples * p_GetChannelFrameSize();
+		size_t StoredSamplesByteOffset = m_StoredSamples * p_GetChannelFrameSize()+m_CurrentBuffersOffset;
+		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
+		{
+			if (m_InternalBuffers[i].size() - StoredSamplesByteOffset < NewSamplesSize)
+			{
+				m_InternalBuffers[i].resize(m_InternalBuffers[i].size() * double(m_GrowthFactor),0);
+			}
+			std::memcpy(m_InternalBuffers[i].data() + StoredSamplesByteOffset, AudioData[i], NewSamplesSize);
+		}
+		m_StoredSamples += NumberOfSamples;
+	}
+	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead) 
+	{
+		if (!m_IsInitialized)
+		{
+			throw std::exception();
+		}
+		size_t SamplesToExtract = std::min(m_StoredSamples, NumberOfSamplesToRead);
+		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
+		{
+			std::memcpy(OutputBuffers[i], m_InternalBuffers[i].data()+m_CurrentBuffersOffset, SamplesToExtract * p_GetChannelFrameSize());
+		}
+		m_StoredSamples -= SamplesToExtract;
+		m_CurrentBuffersOffset = SamplesToExtract * p_GetChannelFrameSize();
+		p_ResizeBuffers();
+		return(SamplesToExtract);
+	}
+	void AudioFIFOBuffer::p_ResizeBuffers()
+	{
+		//TODO använder godtycklig heuristic, kanske vill antingen stora dem som en linked lista eller faktiskt undersöka hur man ska göra?
+		if (m_CurrentBuffersOffset >= m_InternalBuffers[0].size() / 4)
+		{
+			std::vector<std::vector<uint8_t>> NewBuffers = std::vector<std::vector<uint8_t>>(m_InternalBuffers.size(), std::vector<uint8_t>(m_StoredSamples * p_GetChannelFrameSize() * 2, 0));
+			for (size_t i = 0; i < NewBuffers.size(); i++)
+			{
+				std::memcpy(NewBuffers[i].data(), m_InternalBuffers[i].data(), m_StoredSamples * p_GetChannelFrameSize());
+			}
+		}
+	}
+	size_t AudioFIFOBuffer::AvailableSamples()
+	{
+		if (!m_IsInitialized)
+		{
+			throw std::exception();
+		}
+		return(m_StoredSamples);
+	}
+	//END AudioFIFOBuffer
+
+
+
 	//BEGIN AudioToFrameConverter
 	AudioToFrameConverter::AudioToFrameConverter(AudioParameters const& InputParameters, int64_t InitialTimestamp, TimeBase OutputTimebase, size_t FrameSize)
 	{

@@ -218,6 +218,31 @@ namespace MBMedia
 
 		uint8_t** GetData();
 	};
+
+	class AudioFIFOBuffer
+	{
+	private:
+		std::vector<std::vector<uint8_t>> m_InternalBuffers = {};
+		static constexpr float m_GrowthFactor = 1.5;
+		SampleFormatInfo m_InputFormatInfo;
+		AudioParameters m_InputParameters;
+		size_t m_StoredSamples = 0;
+		size_t m_CurrentBuffersOffset = 0;
+
+		bool m_IsInitialized = false;
+		void p_ResizeBuffers();
+		size_t p_GetChannelFrameSize();
+	public:
+		AudioFIFOBuffer() {};
+		AudioFIFOBuffer(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
+		
+		void Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
+		
+		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples);
+		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead);
+		size_t AvailableSamples();
+	};
+
 	class AudioToFrameConverter
 	{
 	private:
