@@ -281,7 +281,33 @@ namespace MBMedia
 		}
 		return(ReturnValue);
 	}
+	bool FormatIsPlanar(SampleFormat FormatToInspect)
+	{
+		return(GetSampleFormatInfo(FormatToInspect).Interleaved == false);
+	}
 
+	size_t GetChannelFrameSize(AudioParameters const& ParametersToInspect)
+	{
+		size_t ReturnValue = 0;
+		if (FormatIsPlanar(ParametersToInspect.AudioFormat))
+		{
+			ReturnValue = GetSampleFormatInfo(ParametersToInspect.AudioFormat).SampleSize;
+		}
+		else
+		{
+			ReturnValue = ParametersToInspect.NumberOfChannels * GetSampleFormatInfo(ParametersToInspect.AudioFormat).SampleSize;
+		}
+		return(ReturnValue);
+	}
+	size_t GetParametersDataPlanes(AudioParameters const& ParametersToInspect)
+	{
+		size_t ReturnValue = ParametersToInspect.NumberOfChannels;
+		if (!FormatIsPlanar(ParametersToInspect.AudioFormat))
+		{
+			ReturnValue = 1;
+		}
+		return(ReturnValue);
+	}
 
 	//BEGIN ContainerDemuxer
 	ContainerDemuxer::ContainerDemuxer(std::string const& InputFile)
@@ -927,7 +953,7 @@ namespace MBMedia
 		m_IsInitialized = true;
 		m_InputFormatInfo = MBMedia::GetSampleFormatInfo(InputParameters.AudioFormat);
 		m_InputParameters = InputParameters;
-		m_InternalBuffers = std::vector<std::vector<uint8_t>>(InputParameters.NumberOfChannels, std::vector<uint8_t>(InitialNumberOfSamples * m_InputFormatInfo.SampleSize, 0));
+		m_InternalBuffers = std::vector<std::vector<uint8_t>>(GetParametersDataPlanes(InputParameters), std::vector<uint8_t>(InitialNumberOfSamples * m_InputFormatInfo.SampleSize, 0));
 	}
 	AudioFIFOBuffer::AudioFIFOBuffer(AudioParameters const& InputParameters, size_t InitialNumberOfSamples)
 	{
@@ -946,23 +972,31 @@ namespace MBMedia
 	}
 	void AudioFIFOBuffer::InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples)
 	{
+		InsertData(AudioData, NumberOfSamples, 0);
+	}
+	void AudioFIFOBuffer::InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples, size_t InputSampleOffset)
+	{
 		if (!m_IsInitialized)
 		{
 			throw std::exception();
 		}
 		size_t NewSamplesSize = NumberOfSamples * p_GetChannelFrameSize();
-		size_t StoredSamplesByteOffset = m_StoredSamples * p_GetChannelFrameSize()+m_CurrentBuffersOffset;
+		size_t StoredSamplesByteOffset = m_StoredSamples * p_GetChannelFrameSize() + m_CurrentBuffersOffset;
 		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
 		{
 			if (m_InternalBuffers[i].size() - StoredSamplesByteOffset < NewSamplesSize)
 			{
-				m_InternalBuffers[i].resize(m_InternalBuffers[i].size() * double(m_GrowthFactor),0);
+				m_InternalBuffers[i].resize(m_CurrentBuffersOffset+NewSamplesSize * double(m_GrowthFactor), 0);
 			}
-			std::memcpy(m_InternalBuffers[i].data() + StoredSamplesByteOffset, AudioData[i], NewSamplesSize);
+			std::memcpy(m_InternalBuffers[i].data() + StoredSamplesByteOffset, AudioData[i]+ (InputSampleOffset* p_GetChannelFrameSize()), NewSamplesSize);
 		}
 		m_StoredSamples += NumberOfSamples;
 	}
 	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead) 
+	{
+		return(ReadData(OutputBuffers, NumberOfSamplesToRead,0));
+	}
+	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset)
 	{
 		if (!m_IsInitialized)
 		{
@@ -971,7 +1005,7 @@ namespace MBMedia
 		size_t SamplesToExtract = std::min(m_StoredSamples, NumberOfSamplesToRead);
 		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
 		{
-			std::memcpy(OutputBuffers[i], m_InternalBuffers[i].data()+m_CurrentBuffersOffset, SamplesToExtract * p_GetChannelFrameSize());
+			std::memcpy(OutputBuffers[i]+ OutputSampleOffset*p_GetChannelFrameSize(), m_InternalBuffers[i].data() + m_CurrentBuffersOffset, SamplesToExtract * p_GetChannelFrameSize());
 		}
 		m_StoredSamples -= SamplesToExtract;
 		m_CurrentBuffersOffset = SamplesToExtract * p_GetChannelFrameSize();

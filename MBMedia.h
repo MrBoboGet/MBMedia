@@ -55,6 +55,7 @@ namespace MBMedia
 	SampleFormat GetPlanarAudioFormat(SampleFormat FormatToConvert);
 	SampleFormat GetInterleavedAudioFormat(SampleFormat FormatToConvert);
 	
+	bool FormatIsPlanar(SampleFormat FormatToInspect);
 	//förutsätter att outputten har korrekt mängd allokerade bytes
 
 
@@ -79,6 +80,9 @@ namespace MBMedia
 		size_t NumberOfChannels = -1;
 	};
 
+
+	size_t GetChannelFrameSize(AudioParameters const& ParametersToInspect);
+	size_t GetParametersDataPlanes(AudioParameters const& ParametersToInspect);
 
 	//OBS Förutsätter att output datan är har utrymmer den behöver. Låg nivå konvertering. Kanske borde lägga till en Converssion context klass...
 	void ConvertSampleData(const uint8_t** InputData, AudioParameters const& InputParameters, uint8_t** OutputBuffer, AudioParameters const& OutputParameters,size_t SamplesToConvert);
@@ -239,7 +243,9 @@ namespace MBMedia
 		void Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
 		
 		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples);
+		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples,size_t InputSampleOffset);
 		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead);
+		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead,size_t OutputSampleOffset);
 		size_t AvailableSamples();
 	};
 
