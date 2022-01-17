@@ -21,6 +21,9 @@ extern "C"
 //#include <ffmpeg/libavutil/>
 }
 ///*
+
+#define MBMEDIA_VERIFY_AUDIO_DATA
+
 namespace MBMedia
 {
 	void h_Print_ffmpeg_Error(int ReadFrameResponse)
@@ -308,7 +311,93 @@ namespace MBMedia
 		}
 		return(ReturnValue);
 	}
+	uint8_t** AllocateAudioBuffer(AudioParameters const& BufferParameters, size_t NumberOfSamples)
+	{
+		size_t NumberOfDataPlanes = GetParametersDataPlanes(BufferParameters);
+		size_t SamplesSize = GetChannelFrameSize(BufferParameters) * NumberOfSamples;
+		uint8_t** ReturnValue = new uint8_t * [NumberOfDataPlanes];
+		for (size_t i = 0; i < NumberOfDataPlanes; i++)
+		{
+			//kanske inte borde men aja, enklast såhär
+			ReturnValue[i] = new uint8_t[SamplesSize];
+			std::memset(ReturnValue[i], 0, SamplesSize);
+		}
+		return(ReturnValue);
+	}
+	void DeallocateAudioBuffer(AudioParameters const& BufferParameters, const uint8_t* const* BufferToDeallocate)
+	{
+		for (size_t i = 0; i < GetParametersDataPlanes(BufferParameters); i++)
+		{
+			delete[] BufferToDeallocate[i];
+		}
+		delete[] BufferToDeallocate;
+	}
+	bool VerifySamples(const uint8_t* const* AudioData, AudioParameters const& DataParameters, size_t NumberOfFrames,size_t SamplesOffset)
+	{
 
+		bool ReturnValue = true;
+		const uint8_t** SamplesToVerify =(const uint8_t**) new uint8_t*[GetParametersDataPlanes(DataParameters)];
+		for (size_t i = 0; i < GetParametersDataPlanes(DataParameters); i++)
+		{
+			SamplesToVerify[i] = (const uint8_t*)AudioData[i] + (GetChannelFrameSize(DataParameters)*SamplesOffset);
+		}
+		SampleFormatInfo FormatInfo = GetSampleFormatInfo(DataParameters.AudioFormat);
+		if (!FormatInfo.Integer)
+		{
+			size_t DataPlanesCount = GetParametersDataPlanes(DataParameters);
+			size_t FloatPerPlane = NumberOfFrames;
+			if (DataPlanesCount == 1)
+			{
+				FloatPerPlane *= DataParameters.NumberOfChannels;
+			}
+			if (FormatInfo.SampleSize == 4)
+			{
+				for (size_t i = 0; i < DataPlanesCount; i++)
+				{
+					for (size_t j = 0; j < FloatPerPlane; j++)
+					{
+						float CurrentFloat = *(((const float*)SamplesToVerify[i]) + j);
+						if (CurrentFloat < -1.1 || CurrentFloat > 1.1)
+						{
+							ReturnValue = false;
+							break;
+						}
+					}
+					if (!ReturnValue)
+					{
+						break;
+					}
+				}
+			}
+			else if (FormatInfo.SampleSize == 8)
+			{
+				for (size_t i = 0; i < DataPlanesCount; i++)
+				{
+
+					for (size_t j = 0; j < FloatPerPlane; j++)
+					{
+						double CurrentFloat = *(((const double*)SamplesToVerify[i]) + j);
+						if (CurrentFloat < -1.1 || CurrentFloat > 1.1)
+						{
+							ReturnValue = false;
+							break;
+						}
+					}
+					if (!ReturnValue)
+					{
+						break;
+					}
+				}
+			}
+
+		}
+		else
+		{
+
+		}
+		delete[] SamplesToVerify;
+		return(ReturnValue);
+	}
 	//BEGIN ContainerDemuxer
 	ContainerDemuxer::ContainerDemuxer(std::string const& InputFile)
 	{
@@ -588,6 +677,11 @@ namespace MBMedia
 		const AVFrame* FFMPEGFrame = (const AVFrame*)m_InternalData.get();
 		return(FFMPEGFrame->pts);
 	}
+	int64_t StreamFrame::GetDuration() const
+	{
+		const AVFrame* FFMPEGFrame = (const AVFrame*)m_InternalData.get();
+		return(FFMPEGFrame->pkt_duration);	
+	}
 	AudioParameters StreamFrame::GetAudioParameters() const
 	{
 		const AVFrame* FFMPEGData = (const AVFrame*)m_InternalData.get();
@@ -779,6 +873,73 @@ namespace MBMedia
 		swr_free(&ConversionContext);
 		assert(ConvertedSamples == OutputSamples);
 	}
+
+	//BEGIN AudioDataConverter
+	AudioDataConverter::AudioDataConverter(AudioParameters const& InputParameters, AudioParameters const& OutputParameters)
+	{
+		m_InputParameters = InputParameters;
+		m_OutputParameters = OutputParameters;
+		SwrContext* ConversionContext = swr_alloc_set_opts(NULL,
+			h_MBLayoutToFFMPEGLayout(OutputParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(OutputParameters.AudioFormat),
+			OutputParameters.SampleRate,
+			h_MBLayoutToFFMPEGLayout(InputParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(InputParameters.AudioFormat),
+			InputParameters.SampleRate,
+			0,
+			NULL);
+		FFMPEGCall(swr_init(ConversionContext));
+		m_AudioBuffer = AudioFIFOBuffer(InputParameters, 2048 * 4);//helt godtyckligt
+		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwrContext);
+	}
+	void AudioDataConverter::InsertData(const uint8_t* const* DataToInsert, size_t NumberOfSamples)
+	{
+#ifdef MBMEDIA_VERIFY_AUDIO_DATA
+		assert(VerifySamples(DataToInsert, m_InputParameters, NumberOfSamples, 0));
+#endif
+		m_AudioBuffer.InsertData(DataToInsert, NumberOfSamples);
+	}
+	size_t AudioDataConverter::AvailableOutputFrames()
+	{
+		SwrContext* ConversionContext = (SwrContext*)m_ConversionContext.get();
+		int ReturnValue = swr_get_out_samples(ConversionContext, m_AudioBuffer.AvailableSamples());
+		FFMPEGCall(ReturnValue);
+		if (ReturnValue < 0)
+		{
+			return(-1);
+		}
+		else
+		{
+			return(ReturnValue);
+		}
+	}
+	void AudioDataConverter::Flush()
+	{
+		//TODO implementera xd
+	}
+	size_t AudioDataConverter::GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples)
+	{
+		SwrContext* ConversionContext = (SwrContext*)m_ConversionContext.get();
+		size_t ConvertedSamples = -1;
+		int Result = swr_convert(ConversionContext, OutputBuffer, NumberOfSamples,(const uint8_t**) m_AudioBuffer.GetBuffer(),m_AudioBuffer.AvailableSamples());
+		m_AudioBuffer.DiscardSamples(NumberOfSamples);
+		FFMPEGCall(Result);
+		if (Result < 0)
+		{
+			return(-1);
+		}
+		else
+		{
+#ifdef MBMEDIA_VERIFY_AUDIO_DATA
+			assert(VerifySamples(OutputBuffer, m_OutputParameters, Result, 0));
+#endif
+			return(Result);
+		}
+	}
+	//END AudioDataConverter
+
+
+
 	//BEGIN AudioConverter
 	void swap(AudioConverter& LeftConverter, AudioConverter& RightConverter)
 	{
@@ -970,6 +1131,41 @@ namespace MBMedia
 			return(m_InputFormatInfo.SampleSize);
 		}
 	}
+	uint8_t** AudioFIFOBuffer::GetBuffer()
+	{
+		if (m_IsInitialized == false)
+		{
+			throw std::exception();
+		}
+		size_t DataPlanesCount = GetParametersDataPlanes(m_InputParameters);
+		if (m_DataPointers == nullptr)
+		{
+			//std::unique_ptr<uint8
+			m_DataPointers = new uint8_t*[DataPlanesCount];
+		}
+		for (size_t i = 0; i < DataPlanesCount; i++)
+		{
+			m_DataPointers[i] = m_InternalBuffers[i].data() + m_CurrentBuffersOffset;
+		}
+		return(m_DataPointers);
+	}
+	const uint8_t* const* AudioFIFOBuffer::GetBuffer() const
+	{
+		if (m_IsInitialized == false)
+		{
+			throw std::exception();
+		}
+		size_t DataPlanesCount = GetParametersDataPlanes(m_InputParameters);
+		if (m_DataPointers == nullptr)
+		{
+			m_DataPointers = new uint8_t * [DataPlanesCount];
+		}
+		for (size_t i = 0; i < DataPlanesCount; i++)
+		{
+			m_DataPointers[i] = (uint8_t*) m_InternalBuffers[i].data() + m_CurrentBuffersOffset;
+		}
+		return(m_DataPointers);
+	}
 	void AudioFIFOBuffer::InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples)
 	{
 		InsertData(AudioData, NumberOfSamples, 0);
@@ -980,21 +1176,24 @@ namespace MBMedia
 		{
 			throw std::exception();
 		}
+#ifdef MBMEDIA_VERIFY_AUDIO_DATA
+		assert(VerifySamples(AudioData, m_InputParameters, NumberOfSamples, InputSampleOffset));
+#endif
 		size_t NewSamplesSize = NumberOfSamples * p_GetChannelFrameSize();
-		size_t StoredSamplesByteOffset = m_StoredSamples * p_GetChannelFrameSize() + m_CurrentBuffersOffset;
+		size_t StoredSamplesByteOffset = (m_StoredSamples * p_GetChannelFrameSize()) + m_CurrentBuffersOffset;
 		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
 		{
 			if (m_InternalBuffers[i].size() - StoredSamplesByteOffset < NewSamplesSize)
 			{
-				m_InternalBuffers[i].resize(m_CurrentBuffersOffset+NewSamplesSize * double(m_GrowthFactor), 0);
+				m_InternalBuffers[i].resize(m_InternalBuffers[i].size()*double(m_GrowthFactor) + NewSamplesSize, 0);
 			}
-			std::memcpy(m_InternalBuffers[i].data() + StoredSamplesByteOffset, AudioData[i]+ (InputSampleOffset* p_GetChannelFrameSize()), NewSamplesSize);
+			std::memcpy(m_InternalBuffers[i].data() + StoredSamplesByteOffset, AudioData[i] + (InputSampleOffset * p_GetChannelFrameSize()), NewSamplesSize);
 		}
 		m_StoredSamples += NumberOfSamples;
 	}
-	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead) 
+	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead)
 	{
-		return(ReadData(OutputBuffers, NumberOfSamplesToRead,0));
+		return(ReadData(OutputBuffers, NumberOfSamplesToRead, 0));
 	}
 	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset)
 	{
@@ -1005,12 +1204,34 @@ namespace MBMedia
 		size_t SamplesToExtract = std::min(m_StoredSamples, NumberOfSamplesToRead);
 		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
 		{
-			std::memcpy(OutputBuffers[i]+ OutputSampleOffset*p_GetChannelFrameSize(), m_InternalBuffers[i].data() + m_CurrentBuffersOffset, SamplesToExtract * p_GetChannelFrameSize());
+			std::memcpy(OutputBuffers[i] + OutputSampleOffset * p_GetChannelFrameSize(), m_InternalBuffers[i].data() + m_CurrentBuffersOffset, SamplesToExtract * p_GetChannelFrameSize());
 		}
 		m_StoredSamples -= SamplesToExtract;
-		m_CurrentBuffersOffset = SamplesToExtract * p_GetChannelFrameSize();
+		m_CurrentBuffersOffset += SamplesToExtract * p_GetChannelFrameSize();
 		p_ResizeBuffers();
+#ifdef MBMEDIA_VERIFY_AUDIO_DATA
+		assert(VerifySamples(OutputBuffers, m_InputParameters, SamplesToExtract, OutputSampleOffset));
+#endif
 		return(SamplesToExtract);
+	}
+	void AudioFIFOBuffer::DiscardSamples(size_t SamplesToDiscard)
+	{
+		assert(GetParametersDataPlanes(m_InputParameters) == m_InternalBuffers.size());
+		if (SamplesToDiscard >= m_StoredSamples)
+		{
+			for (size_t i = 0; i < GetParametersDataPlanes(m_InputParameters); i++)
+			{
+				m_InternalBuffers[i].resize(0);
+			}
+			m_StoredSamples = 0;
+			m_CurrentBuffersOffset = 0;
+		}
+		else
+		{
+			m_StoredSamples -= SamplesToDiscard;
+			m_CurrentBuffersOffset += p_GetChannelFrameSize() * SamplesToDiscard;
+			p_ResizeBuffers();
+		}
 	}
 	void AudioFIFOBuffer::p_ResizeBuffers()
 	{

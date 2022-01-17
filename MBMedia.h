@@ -84,6 +84,16 @@ namespace MBMedia
 	size_t GetChannelFrameSize(AudioParameters const& ParametersToInspect);
 	size_t GetParametersDataPlanes(AudioParameters const& ParametersToInspect);
 
+	uint8_t** AllocateAudioBuffer(AudioParameters const& BufferParameters, size_t NumberOfSamples);
+	void DeallocateAudioBuffer(AudioParameters const& BufferParameters , const uint8_t* const* BufferToDeallocatioe);
+
+	//utiltiy funktion för att verifiera att samplesen inte är fucked, fungerar egentligen bara för floats eftersom 
+	//PCM inte har något sätt att avgöra hur om den är invalid. Kanske skulle kunna inkludera att skillnaden mellan 2 individuella
+	//samples inte orsaker en "pop" så att säga
+	bool VerifySamples(const uint8_t* const* AudioData, AudioParameters const& DataParameters,size_t NumberOfFrames,size_t SampelsOffset = 0);
+
+
+
 	//OBS Förutsätter att output datan är har utrymmer den behöver. Låg nivå konvertering. Kanske borde lägga till en Converssion context klass...
 	void ConvertSampleData(const uint8_t** InputData, AudioParameters const& InputParameters, uint8_t** OutputBuffer, AudioParameters const& OutputParameters,size_t SamplesToConvert);
 	//enum class VideoFormat
@@ -212,6 +222,7 @@ namespace MBMedia
 		StreamFrame(void* FFMPEGData, TimeBase FrameTimeBase, MediaType FrameType);
 		StreamFrame();
 		int64_t GetPresentationTime() const;
+		int64_t GetDuration() const;// <0 om inte känd
 		TimeBase GetTimeBase()const {return(m_TimeBase);};
 		MediaType GetMediaType() const { return(m_MediaType); };
 
@@ -236,16 +247,25 @@ namespace MBMedia
 		bool m_IsInitialized = false;
 		void p_ResizeBuffers();
 		size_t p_GetChannelFrameSize();
+		void Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
+		
+		mutable uint8_t** m_DataPointers = nullptr;
 	public:
 		AudioFIFOBuffer() {};
 		AudioFIFOBuffer(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
 		
-		void Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
+		//void Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
 		
 		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples);
 		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples,size_t InputSampleOffset);
 		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead);
 		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead,size_t OutputSampleOffset);
+		
+		uint8_t** GetBuffer();
+		const uint8_t* const* GetBuffer() const;
+
+		void DiscardSamples(size_t SamplesToDiscard);
+
 		size_t AvailableSamples();
 	};
 
@@ -272,6 +292,25 @@ namespace MBMedia
 
 	public:
 	};
+
+	class AudioDataConverter
+	{
+	private:
+		std::unique_ptr<void, void (*)(void*)> m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
+		AudioFIFOBuffer m_AudioBuffer;
+		AudioParameters m_InputParameters;
+		AudioParameters m_OutputParameters;
+	public:
+		AudioDataConverter(AudioParameters const& InputParameters, AudioParameters const& OutputParameters);
+		//finns inte riktigt något sätt att verifiera att input datan är korrekt formatterad efter AudioParamters klassen, men är den ej det är det
+		//undefined behaviour
+		void InsertData(const uint8_t* const* DataToInsert, size_t NumberOfSamples);
+		size_t AvailableOutputFrames();//frames eller samples, vet inte riktigt än...
+		size_t GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples);
+		void Flush();
+	};
+
+	//Semantiken bakom båda dem här struktsen blev aningen fucky och lite wucky, men den under konverterar per frame, och den över per audio data
 	class AudioConverter
 	{
 	private:
