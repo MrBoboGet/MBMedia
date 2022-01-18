@@ -405,6 +405,12 @@ namespace MBMedia
 		InputFormatContext = avformat_alloc_context();
 		//avformat_new_stream
 		//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
+
+		//DEBUG FÖR png
+		InputFormatContext->max_analyze_duration = 100000000;
+		InputFormatContext->probesize = 100000000;
+		//
+
 		FFMPEGCall(avformat_open_input(&InputFormatContext, InputFile.c_str(), NULL, NULL));
 		//läsar in data om själva datastreamsen
 		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
@@ -476,7 +482,7 @@ namespace MBMedia
 		//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
 		//InputFormatContext->ifo
 
-		const size_t ProbeDataSize = 1000000;
+		const size_t ProbeDataSize = 5000000;//lite yikes, rätt mycket data som läses?
 		//uint8_t* ProbeData[ProbeDataSize + AVPROBE_PADDING_SIZE];
 		//memset(ProbeData, 0, ProbeDataSize + AVPROBE_PADDING_SIZE);
 		m_ProbedData = std::string(ProbeDataSize, 0);
@@ -488,6 +494,13 @@ namespace MBMedia
 		ProbeStruct.filename = "";
 		ProbeStruct.mime_type = "";
 		InputFormatContext->iformat = av_probe_input_format(&ProbeStruct, 1);
+
+		//DEBUG FÖR png
+		InputFormatContext->max_analyze_duration = 100000000;
+		InputFormatContext->probesize = 100000000;
+		//
+
+
 		//InputFormatContext->iformat =(AVInputFormat*)123123123;
 		m_ProbedData = "";//OBS efersom vi antar att streamen är searchable, kanske inte alltid är det?
 		m_CostumIO->SetInputPosition(0);
@@ -1350,8 +1363,31 @@ namespace MBMedia
 		m_NewVideoParameters = NewParameters;
 		m_InputTimebase = InputTimebase;
 		//Swsc
-		SwsContext* ConversionContext = sws_getContext(OldParameters.Width, OldParameters.Height,h_MBVideoFormatToFFMPEGVideoFormat(OldParameters.Format),
-			NewParameters.Width,NewParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(NewParameters.Format), SWS_BILINEAR,NULL,NULL,NULL);
+		//DEBUG
+		switch (h_MBVideoFormatToFFMPEGVideoFormat(OldParameters.Format)) 
+		{
+		case AV_PIX_FMT_YUVJ420P:
+			m_OldVideoParameters.Format = h_FFMPEGVideoFormatToMBVideoFormat(AV_PIX_FMT_YUV420P);
+			break;
+		case AV_PIX_FMT_YUVJ422P:
+			m_OldVideoParameters.Format = h_FFMPEGVideoFormatToMBVideoFormat(AV_PIX_FMT_YUV422P);
+			break;
+		case AV_PIX_FMT_YUVJ444P:
+			m_OldVideoParameters.Format = h_FFMPEGVideoFormatToMBVideoFormat(AV_PIX_FMT_YUV444P);
+			break;
+		case AV_PIX_FMT_YUVJ440P:
+			m_OldVideoParameters.Format = h_FFMPEGVideoFormatToMBVideoFormat(AV_PIX_FMT_YUV440P);
+			break;
+		}
+		if (m_NewVideoParameters.Width % 32 != 0)
+		{
+			m_NewVideoParameters.Width = m_NewVideoParameters.Width + 32 - (m_NewVideoParameters.Width % 32);
+		}
+		//DEBUG
+
+
+		SwsContext* ConversionContext = sws_getContext(m_OldVideoParameters.Width, m_OldVideoParameters.Height,h_MBVideoFormatToFFMPEGVideoFormat(m_OldVideoParameters.Format),
+			m_NewVideoParameters.Width, m_NewVideoParameters.Height, h_MBVideoFormatToFFMPEGVideoFormat(m_NewVideoParameters.Format), SWS_BILINEAR,NULL,NULL,NULL);
 		m_ConversionContext = std::unique_ptr<void, void (*)(void*)>(ConversionContext, _FreeSwsContext);
 	}
 	AVFrame* h_GetFFMPEGFrame(int Width, int Height, VideoFormat FormatToUse)
