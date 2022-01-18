@@ -357,7 +357,7 @@ namespace MBMedia
 					for (size_t j = 0; j < FloatPerPlane; j++)
 					{
 						float CurrentFloat = *(((const float*)SamplesToVerify[i]) + j);
-						if (CurrentFloat < -1.1 || CurrentFloat > 1.1)
+						if (CurrentFloat < -2 || CurrentFloat > 2)
 						{
 							ReturnValue = false;
 							break;
@@ -377,7 +377,7 @@ namespace MBMedia
 					for (size_t j = 0; j < FloatPerPlane; j++)
 					{
 						double CurrentFloat = *(((const double*)SamplesToVerify[i]) + j);
-						if (CurrentFloat < -1.1 || CurrentFloat > 1.1)
+						if (CurrentFloat < -2 || CurrentFloat > 2)
 						{
 							ReturnValue = false;
 							break;
@@ -879,13 +879,17 @@ namespace MBMedia
 	{
 		m_InputParameters = InputParameters;
 		m_OutputParameters = OutputParameters;
+		if (int64_t(InputParameters.Layout) == 0 && InputParameters.NumberOfChannels == 1)
+		{
+			m_InputParameters.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_MONO);
+		}
 		SwrContext* ConversionContext = swr_alloc_set_opts(NULL,
-			h_MBLayoutToFFMPEGLayout(OutputParameters.Layout),
-			h_MBSampleFormatToFFMPEGSampleFormat(OutputParameters.AudioFormat),
-			OutputParameters.SampleRate,
-			h_MBLayoutToFFMPEGLayout(InputParameters.Layout),
-			h_MBSampleFormatToFFMPEGSampleFormat(InputParameters.AudioFormat),
-			InputParameters.SampleRate,
+			h_MBLayoutToFFMPEGLayout(m_OutputParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(m_OutputParameters.AudioFormat),
+			m_OutputParameters.SampleRate,
+			h_MBLayoutToFFMPEGLayout(m_InputParameters.Layout),
+			h_MBSampleFormatToFFMPEGSampleFormat(m_InputParameters.AudioFormat),
+			m_InputParameters.SampleRate,
 			0,
 			NULL);
 		FFMPEGCall(swr_init(ConversionContext));
