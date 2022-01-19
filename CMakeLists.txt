@@ -105,9 +105,10 @@ endmacro()
 ##END MBPM_VARIABLES
 set(PROJECT_SOURCES 
 
-	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.cpp"
-	"${CMAKE_CURRENT_SOURCE_DIR}/FFMPEGDocExample_Transcode.cpp"
-	"${CMAKE_CURRENT_SOURCE_DIR}/leandromoreira_Transcode.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/MBMedia.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/ContainerMuxing.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/MBAudioUtility.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/MBMediaInternals.cpp"
 )
 set(PROJECT_HEADERS 
 	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.h"
@@ -142,19 +143,19 @@ set(EXECUTABLE_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/MBMediaTest.cpp"
 )
 
-add_library(MBMedia_SD STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia.h")
+add_library(MBMedia_SD STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia.h" "ContainerMuxing.cpp" "MBAudioUtility.cpp" "MBMediaInternals.cpp")
 MBPM_ApplyTargetConfiguration("MBMedia_SD" "STATIC" "DEBUG")
 target_compile_features("MBMedia_SD" PRIVATE cxx_std_17)
 target_link_libraries("MBMedia_SD" ${COMMON_LIBRARIES})
 target_include_directories("MBMedia_SD" PRIVATE ${COMMON_INCLUDE_DIRECTORIES})
 
-add_library(MBMedia_SR STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia.h")
+add_library(MBMedia_SR STATIC ${COMMON_FILES} "MBMediaTest.cpp" "MBMedia.h" "ContainerMuxing.cpp" "MBAudioUtility.cpp" "MBMediaInternals.cpp")
 MBPM_ApplyTargetConfiguration("MBMedia_SR" "STATIC" "RELEASE")
 target_compile_features("MBMedia_SR" PRIVATE cxx_std_17)
 target_link_libraries("MBMedia_SR" ${COMMON_LIBRARIES})
 target_include_directories("MBMedia_SR" PRIVATE ${COMMON_INCLUDE_DIRECTORIES})
 
-add_executable(MBMediaTest ${COMMON_FILES} ${EXECUTABLE_FILES} "MBMedia.h")
+add_executable(MBMediaTest ${COMMON_FILES} ${EXECUTABLE_FILES} "MBMedia.h" "ContainerMuxing.cpp" "MBAudioUtility.cpp" "MBMediaInternals.cpp")
 MBPM_ApplyTargetConfiguration("MBMediaTest" "STATIC" "DEBUG")
 target_compile_features("MBMediaTest" PRIVATE cxx_std_17)
 target_link_libraries("MBMediaTest" ${COMMON_LIBRARIES})
