@@ -8,6 +8,7 @@
 #include <numeric>
 #include <cmath>
 
+#include <cstring>
 #include "MBMediaInternals.h"
 namespace MBMedia
 {

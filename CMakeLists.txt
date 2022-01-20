@@ -120,10 +120,10 @@ set(COMMON_FILES ${PROJECT_SOURCES} ${PROJECT_HEADERS})
 set(COMMON_DYNAMIC_LIBRARIES 
 )
 set (FFMPEG_LIBS
+    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavformat/libavformat.lib"
     "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavcodec/libavcodec.lib"
     "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavdevice/libavdevice.lib"
     "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavfilter/libavfilter.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavformat/libavformat.lib"
     "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavutil/libavutil.lib"
     "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswresample/libswresample.lib"
     "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswscale/libswscale.lib"

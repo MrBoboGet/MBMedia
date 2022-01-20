@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <cstddef>
 namespace MBMedia
 {
 	enum class SampleFormat
@@ -47,7 +48,7 @@ namespace MBMedia
 		virtual MBMedia::AudioParameters GetAudioParameters() = 0;
 		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) = 0;
 		virtual bool IsFinished() = 0;
-		virtual ~AudioStream() = 0
+		virtual ~AudioStream()
 		{
 
 		}
@@ -61,7 +62,7 @@ namespace MBMedia
 		virtual MBMedia::AudioParameters GetAudioParameters() = 0;
 		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) = 0;
 		//virtual void Flush() = 0;
-		virtual ~AudioStreamFilter() = 0
+		virtual ~AudioStreamFilter() 
 		{
 
 		}

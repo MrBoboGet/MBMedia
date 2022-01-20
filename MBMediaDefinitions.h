@@ -10,6 +10,7 @@ namespace MBMedia
 		H264,
 		H265,
 		VP9,
+		Opus,
 		Null,
 	};
 	enum class MediaType

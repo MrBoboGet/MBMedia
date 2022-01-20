@@ -9,6 +9,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 namespace MBMedia
 {
 	SampleFormat GetPlanarAudioFormat(SampleFormat FormatToConvert);

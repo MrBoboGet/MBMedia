@@ -74,7 +74,7 @@ namespace MBMedia
 	//END StreamPacket
 	SampleFormatInfo s_SampleFormatInfoTable[] =
 	{
-		{false,false,false,-1},
+		{false,false,false,size_t(-1)},
 
 		{ true,false,true,1 },
 		{ true,false,true,2 },
@@ -88,7 +88,7 @@ namespace MBMedia
 		{false,false,false,sizeof(float)},
 		{false,false,false,sizeof(double)},
 
-		{false,false,false,-1},
+		{false,false,false,size_t(-1)},
 	};
 	SampleFormatInfo GetSampleFormatInfo(SampleFormat FormatToInspect)
 	{
@@ -610,7 +610,7 @@ namespace MBMedia
 	{
 		AVFormatContext* ContainerFormat = (AVFormatContext*)StreamToDecode.m_InternalData.get();
 		AVCodecParameters* NewInputCodecParamters = ContainerFormat->streams[StreamToDecode.m_StreamIndex]->codecpar;
-		AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
+		const AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
 		AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
 		FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
 		//sedan måste vi öppna den, vet inte riktigt varför, initializerar den kanske?
@@ -803,7 +803,7 @@ namespace MBMedia
 		{
 			ConvertedFrame->pts = m_CurrentTimestamp;
 			ConvertedFrame->pkt_dts = m_CurrentTimestamp;
-			ConvertedFrame->pkt_pts = m_CurrentTimestamp;
+			//ConvertedFrame->pkt_pts = m_CurrentTimestamp;
 			//ReturnValue = StreamFrame(ConvertedFrame, FrameToConvert->GetTimeBase(), m_Type);
 			ConvertedFrame->nb_samples = ConversionResult;
 			m_StoredFrames.push(StreamFrame(ConvertedFrame, m_InputTimebase, MediaType::Audio));
@@ -923,7 +923,7 @@ namespace MBMedia
 		FFMPEGCall(av_audio_fifo_read(AudioBuffer, (void**)NewFrame->data, NewFrame->nb_samples));
 		NewFrame->pts = m_CurrentTimeStamp;
 		NewFrame->pkt_dts = m_CurrentTimeStamp;
-		NewFrame->pkt_pts = m_CurrentTimeStamp;
+		//NewFrame->pkt_pts = m_CurrentTimeStamp;
 		int64_t  TimestampIncrease = (SamplesToExtract * m_OutputTimebase.den) / (m_OutputTimebase.num * m_FrameParameters.SampleRate);
 		m_CurrentTimeStamp += TimestampIncrease;
 		m_StoredFrames.push_back(StreamFrame(NewFrame, m_OutputTimebase, MediaType::Audio));
@@ -1007,9 +1007,13 @@ namespace MBMedia
 		NewFrame->width = Width;
 		NewFrame->height = Height;
 		NewFrame->format = h_MBVideoFormatToFFMPEGVideoFormat(FormatToUse);
-		int numBytes = avpicture_get_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+
+		//Nu skulle man kunan ställa sig frågan, varför är aline på 32? Svaret är: VET EJ.
+		//Att align behöver vara samma för båda är ju logiskt, men att det måste vara så och inte funkar med 0 förstår jag inte
+		//jag vet att det andra delar av ffmpeg kräver 32 bitars alignment, så jag chansade och körde på det
+		int numBytes = av_image_get_buffer_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height,32);
 		uint8_t* dataBuffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
-		avpicture_fill((AVPicture*)NewFrame, dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height);
+		av_image_fill_arrays(NewFrame->data, NewFrame->linesize,dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height,32);
 		return(NewFrame);
 	}
 	void VideoConverter::InsertFrame(StreamFrame const& FrameToInsert)
@@ -1028,7 +1032,7 @@ namespace MBMedia
 		NewFrame->pts = InputFrame->pts;
 		NewFrame->pkt_dts = InputFrame->pkt_dts;
 		NewFrame->pkt_duration = InputFrame->pkt_duration;
-		NewFrame->pkt_pts = InputFrame->pkt_pts;
+		//NewFrame->pkt_pts = InputFrame->pkt_pts;
 		m_StoredFrames.push(StreamFrame(NewFrame, FrameToInsert.GetTimeBase(), MediaType::Video));
 	}
 	StreamFrame VideoConverter::GetNextFrame()
@@ -1066,7 +1070,7 @@ namespace MBMedia
 		NewFrame->pts = InputFrame->pts;
 		NewFrame->pkt_dts = InputFrame->pkt_dts;
 		NewFrame->pkt_duration = InputFrame->pkt_duration;
-		NewFrame->pkt_pts = InputFrame->pkt_pts;
+		//NewFrame->pkt_pts = InputFrame->pkt_pts;
 		return(StreamFrame(NewFrame, ImageToFlip.GetTimeBase(), MediaType::Video));
 	}
 	//BEGIN FrameConverter
@@ -1151,7 +1155,7 @@ namespace MBMedia
 	StreamEncoder::StreamEncoder(Codec StreamType, VideoDecodeInfo const& EncodeInfo)
 	{
 		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
-		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		const AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
 		AVCodecContext* VideoEncodeContext = avcodec_alloc_context3(FFMpegCodec);
 
 		VideoEncodeContext->height = EncodeInfo.VideoInfo.Height;
@@ -1176,7 +1180,7 @@ namespace MBMedia
 	StreamEncoder::StreamEncoder(Codec StreamType, AudioDecodeInfo const& EncodeInfo)
 	{
 		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
-		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		const AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
 		AVCodecContext* AudioEncodeContext = avcodec_alloc_context3(FFMpegCodec);
 		AudioEncodeContext->bit_rate = EncodeInfo.AverageBitrate;
 		if (AudioEncodeContext->bit_rate == 0)
@@ -1203,7 +1207,7 @@ namespace MBMedia
 	StreamEncoder::StreamEncoder(Codec StreamType, VideoEncodeInfo const& EncodeInfo)
 	{
 		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
-		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		const AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
 		AVCodecContext* VideoEncodeContext = avcodec_alloc_context3(FFMpegCodec);
 
 		VideoEncodeContext->height = EncodeInfo.VideoInfo.Height;
@@ -1229,7 +1233,7 @@ namespace MBMedia
 	StreamEncoder::StreamEncoder(Codec StreamType, AudioEncodeInfo const& EncodeInfo)
 	{
 		AVCodecID CodecToUse = ConnectedTypes[(size_t)StreamType].AssoicatedCodecId;
-		AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
+		const AVCodec* FFMpegCodec = avcodec_find_encoder(CodecToUse);
 		AVCodecContext* AudioEncodeContext = avcodec_alloc_context3(FFMpegCodec);
 		AudioEncodeContext->bit_rate = EncodeInfo.TargetBitrate;
 		AudioEncodeContext->rc_buffer_size = 4 * 1000 * 10000;
