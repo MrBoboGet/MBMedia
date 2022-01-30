@@ -38,6 +38,19 @@ namespace MBMedia
 		SampleFormat AudioFormat = SampleFormat::Null;
 		uint64_t SampleRate = -1;
 		size_t NumberOfChannels = -1;
+		bool operator==(AudioParameters const& OtherParameters)
+		{
+			bool ReturnValue = true;
+			ReturnValue = ReturnValue && (Layout == OtherParameters.Layout);
+			ReturnValue = ReturnValue && (AudioFormat == OtherParameters.AudioFormat);
+			ReturnValue = ReturnValue && (SampleRate == OtherParameters.SampleRate);
+			ReturnValue = ReturnValue && (NumberOfChannels == OtherParameters.NumberOfChannels);
+			return(ReturnValue);
+		}
+		bool operator!=(AudioParameters const& OtherParameters)
+		{
+			return(!(*this == OtherParameters));
+		}
 	};
 
 	class AudioStream

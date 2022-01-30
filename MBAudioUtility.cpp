@@ -166,7 +166,12 @@ namespace MBMedia
 	void AudioMixer::AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource)
 	{
 		//m_StoredSamples.push_back(std::vector<std::string>(NewAudioSource->GetAudioParameters().NumberOfChannels, std::string()));
-		m_StoredSamples.push_back(MBMedia::AudioFIFOBuffer(NewAudioSource->GetAudioParameters(), 4096));//totalt godtycklig
+		//m_StoredSamples.push_back(MBMedia::AudioFIFOBuffer(NewAudioSource->GetAudioParameters(), 4096));//totalt godtycklig
+		if (NewAudioSource->GetAudioParameters() != m_OutputParameters)
+		{
+			//NewAudioSource = std::unique_ptr<AudioStream>(new AudioDataConverter( std::move()
+			NewAudioSource = std::unique_ptr<AudioStream>(new AudioInputConverter(std::move(NewAudioSource), m_OutputParameters));
+		}
 		m_InputSources.push_back(std::move(NewAudioSource));
 	}
 	void AudioMixer::SetOutputParameters(MBMedia::AudioParameters const& NewParameters)
@@ -197,77 +202,28 @@ namespace MBMedia
 		}
 		//TODO kan optimeras, själva interfacen med
 		m_InputSources.erase(m_InputSources.begin() + IndexToRemove);
-		m_StoredSamples.erase(m_StoredSamples.begin() + IndexToRemove);
+		//m_AudioConverters.erase(m_AudioConverters.begin() + IndexToRemove);
 	}
-	std::vector<std::string> AudioMixer::p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples)
+	AudioBuffer AudioMixer::p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples)
 	{
-		AudioStream& CurrentSource = *m_InputSources[SourceIndex];
-		MBMedia::AudioParameters InputAudioParameters = CurrentSource.GetAudioParameters();
-		MBMedia::SampleFormatInfo SampleInfo = MBMedia::GetSampleFormatInfo(InputAudioParameters.AudioFormat);
-
-		const size_t InputDataPlanes = MBMedia::GetParametersDataPlanes(InputAudioParameters);
-		const size_t OutputDataPlanes = MBMedia::GetParametersDataPlanes(m_OutputParameters);
-		const size_t InputFrameSize = MBMedia::GetChannelFrameSize(InputAudioParameters);
-		const size_t OutputFrameSize = MBMedia::GetChannelFrameSize(m_OutputParameters);
-
-
-		std::vector<std::string> ReturnValue = std::vector<std::string>(OutputDataPlanes,
-			std::string(NumberOfSamples * OutputFrameSize, 0));
-		size_t ExtractedSamples = 0;
+		AudioBuffer ReturnValue = AudioBuffer(m_OutputParameters, NumberOfSamples);
+		size_t RecievedSamples = m_InputSources[SourceIndex]->GetNextSamples(ReturnValue.GetData(), NumberOfSamples, 0);
+		//TODO kanske redundnat, inte säker på om det ska krävas att man alltid har 0:at resten av inputen...
+		if (RecievedSamples < NumberOfSamples)
 		{
-			uint8_t** TempOutputSamples = new uint8_t * [OutputDataPlanes];
-			for (size_t i = 0; i < OutputDataPlanes; i++)
+			for (size_t i = 0; i < GetParametersDataPlanes(m_OutputParameters); i++)
 			{
-				TempOutputSamples[i] = (uint8_t*)ReturnValue[i].data();
+				size_t ByteOffset = RecievedSamples * GetChannelFrameSize(m_OutputParameters);
+				size_t TotalSize = NumberOfSamples * GetChannelFrameSize(m_OutputParameters);
+				std::memset(ReturnValue.GetData()[i] + ByteOffset, 0, TotalSize - ByteOffset);
 			}
-			ExtractedSamples = m_StoredSamples[SourceIndex].ReadData(TempOutputSamples, NumberOfSamples);
-			delete[] TempOutputSamples;
 		}
-		uint64_t StreamGCD = std::gcd(m_OutputParameters.SampleRate, InputAudioParameters.SampleRate);
-		size_t OutputStreamIncrement = m_OutputParameters.SampleRate / StreamGCD;
-		size_t InputStreamIncrement = InputAudioParameters.SampleRate / StreamGCD;
-
-		size_t BatchesToExtract = std::ceil(double(NumberOfSamples - ExtractedSamples) / OutputStreamIncrement);
-		size_t InputSamplesToExtract = BatchesToExtract * InputStreamIncrement;
-		size_t OutputSamplesToRecieve = BatchesToExtract * OutputStreamIncrement;
-
-		uint8_t** OutputSamples = new uint8_t * [OutputDataPlanes];
-		uint8_t** InputSamples = new uint8_t * [InputDataPlanes];
-
-		for (size_t i = 0; i < InputDataPlanes; i++)
-		{
-			InputSamples[i] = new uint8_t[InputSamplesToExtract * InputFrameSize];
-		}
-		for (size_t i = 0; i < OutputDataPlanes; i++)
-		{
-			OutputSamples[i] = new uint8_t[OutputSamplesToRecieve * OutputFrameSize];
-		}
-		size_t RecievedSamples = CurrentSource.GetNextSamples(InputSamples, InputSamplesToExtract,0);
-		float* DEBUGInputPointer = (float*)InputSamples[0];
-		MBMedia::ConvertSampleData((const uint8_t**)InputSamples, InputAudioParameters, OutputSamples, m_OutputParameters, InputSamplesToExtract);
-		float* DebugOutputPointer = (float*)OutputSamples[0];
-		for (size_t i = 0; i < OutputDataPlanes; i++)
-		{
-			memcpy(ReturnValue[i].data() + ExtractedSamples * OutputFrameSize, OutputSamples[i], (NumberOfSamples - ExtractedSamples) * OutputFrameSize);
-			m_StoredSamples[SourceIndex].InsertData(OutputSamples, OutputSamplesToRecieve - NumberOfSamples, NumberOfSamples);
-		}
-		for (size_t i = 0; i < InputDataPlanes; i++)
-		{
-			delete[] InputSamples[i];
-		}
-		for (size_t i = 0; i < OutputDataPlanes; i++)
-		{
-			delete[] OutputSamples[i];
-		}
-		delete[] InputSamples;
-		delete[] OutputSamples;
-		//TODO ska jag faktiskt fixa det här eller bara anta att mixer outputtar lika mycket som begärdes?
-		*OutRecievedSamples = NumberOfSamples;
+		*OutRecievedSamples = RecievedSamples;
 		return(ReturnValue);
 	}
 	size_t AudioMixer::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset)
 	{
-		std::vector<std::vector<std::string>> TotalInputData = {};
+		std::vector<AudioBuffer> TotalInputData = {};
 
 		size_t MaxRecievedSamples = 0;
 		for (size_t i = 0; i < m_InputSources.size(); i++)
@@ -299,32 +255,81 @@ namespace MBMedia
 		//float* TestPointer = (float*)TotalInputData[0][0].data();
 		return(MaxRecievedSamples);
 	}
-	void AudioMixer::p_MixInputSources(std::vector<std::vector<std::string>> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset)
+	template<typename T> 
+	void h_AddBuffers(const void** InBuffers_, void* OutBuffer_,size_t NumberOfBuffers,size_t BufferLength)
 	{
-		assert(InputData.size() == 1);
+		const T* const* InBuffers = (const T* const*)InBuffers_;
+		T* OutBuffer = (T*)OutBuffer_;
+
+		for (size_t i = 0; i < BufferLength; i++)
+		{
+			T Result = 0;
+			for(size_t j = 0; j < NumberOfBuffers;j++)
+			{
+				Result += InBuffers[j][i];
+			}
+			OutBuffer[i] = Result;
+		}
+	}
+
+	void AudioMixer::p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset)
+	{
 		if (InputData.size() == 0)
 		{
-			return;//borde sätta allt till 0
+			return;
 		}
-		float* TestPointer1 = (float*)InputData[0][0].data();
-		//float* TestPointer2 = (float*)InputData[0][1].data();
 #ifdef MBMEDIA_VERIFY_AUDIO_DATA
-		//VerifySamples(InputData,m_InputSources,)
+		size_t FirstBufferSize = InputData[0].GetSamplesCount();
+		for (size_t i = 1; i < InputData.size(); i++)
+		{
+			assert(InputData[i].GetSamplesCount() == FirstBufferSize);
+		}
 #endif // MBMEDIA_VERIFY_AUDIO_DATA
+		
+		//for (size_t i = 0; i < MBMedia::GetParametersDataPlanes(m_OutputParameters); i++)
+		//{
+		//	std::memcpy(OutputData[i]+ MBMedia::GetChannelFrameSize(m_OutputParameters)*OutputSampleOffset, InputData[0][i].data(), NumberOfSamples * MBMedia::GetChannelFrameSize(m_OutputParameters));
+		//}
 
-		//h_ArrayIsAudiData(InputData[0][0].data(), NumberOfSamples);
-		//h_ArrayIsAudiData(InputData[0][1].data(), NumberOfSamples);
+		size_t SamplesPerPlane = NumberOfSamples;
+		if (!MBMedia::FormatIsPlanar(m_OutputParameters.AudioFormat))
+		{
+			SamplesPerPlane *= m_OutputParameters.NumberOfChannels;
+		}
 		for (size_t i = 0; i < MBMedia::GetParametersDataPlanes(m_OutputParameters); i++)
 		{
-			std::memcpy(OutputData[i]+ MBMedia::GetChannelFrameSize(m_OutputParameters)*OutputSampleOffset, InputData[0][i].data(), NumberOfSamples * MBMedia::GetChannelFrameSize(m_OutputParameters));
+			const uint8_t** DataPlanes =(const uint8_t **) new uint8_t * [InputData.size()];
+			for (size_t j = 0; j < InputData.size(); j++)
+			{
+				DataPlanes[j] = InputData[j].GetData()[i];
+			}
+			if (m_OutputParameters.AudioFormat == SampleFormat::DBL || m_OutputParameters.AudioFormat == SampleFormat::DBLP)
+			{
+				h_AddBuffers<double>((const void**)DataPlanes, (void*)(OutputData[i]+GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+			}
+			else if (m_OutputParameters.AudioFormat == SampleFormat::FLTP || m_OutputParameters.AudioFormat == SampleFormat::FLT)
+			{
+				h_AddBuffers<float>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+			}
+			else if (m_OutputParameters.AudioFormat == SampleFormat::S16 || m_OutputParameters.AudioFormat == SampleFormat::S16)
+			{
+				h_AddBuffers<int16_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+			}
+			else if (m_OutputParameters.AudioFormat == SampleFormat::S32 || m_OutputParameters.AudioFormat == SampleFormat::S32)
+			{
+				h_AddBuffers<int32_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+			}
+			else if (m_OutputParameters.AudioFormat == SampleFormat::U8 || m_OutputParameters.AudioFormat == SampleFormat::U8)
+			{
+				h_AddBuffers<uint8_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+			}
+			delete[] DataPlanes;
 		}
+
+
 #ifdef MBMEDIA_VERIFY_AUDIO_DATA
 		assert(VerifySamples(OutputData, m_OutputParameters, NumberOfSamples));
 #endif // MBMEDIA_VERIFY_AUDIO_DATA
-		TestPointer1 = (float*)OutputData[0];
-		//TestPointer2 = (float*)OutputData[1];
-		//h_ArrayIsAudiData(OutputData[0], NumberOfSamples);
-		//h_ArrayIsAudiData(OutputData[1], NumberOfSamples);
 	}
 	bool AudioMixer::IsFinished()
 	{
@@ -449,6 +454,49 @@ namespace MBMedia
 		}
 	}
 	//END AudioDataConverter
+
+	//BEGIN AudioInputConverter
+	AudioParameters AudioInputConverter::GetAudioParameters() 
+	{
+		return(m_OutputParameters);
+	}
+	size_t AudioInputConverter::GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples, size_t OutputSampleOffset)
+	{
+		const size_t DataFetchChunk = 4096;
+		AudioBuffer TempBuffer = AudioBuffer(m_InternalStream->GetAudioParameters(), DataFetchChunk);
+		size_t FetchedSamples = 0;
+		while (FetchedSamples < NumberOfSamples)
+		{
+			if(!m_InternalStream->IsFinished())
+			{
+				size_t InputStreamSamples = m_InternalStream->GetNextSamples(TempBuffer.GetData(), DataFetchChunk, 0);
+				m_InternalConverter.InsertData(TempBuffer.GetData(), InputStreamSamples, 0);
+			}
+			size_t SamplesToFetch = std::min(m_InternalConverter.AvailableSamples(), NumberOfSamples - FetchedSamples);
+			if (SamplesToFetch == 0)
+			{
+				break;
+			}
+			FetchedSamples += m_InternalConverter.GetNextSamples(OutputBuffer, SamplesToFetch, FetchedSamples + OutputSampleOffset);
+		}
+		return(FetchedSamples);
+	}
+	bool AudioInputConverter::IsFinished()
+	{
+		return(m_InternalConverter.AvailableSamples() == 0 && m_InternalStream->IsFinished());
+	}
+
+	AudioInputConverter::AudioInputConverter(std::unique_ptr<AudioStream> StreamToConvert, AudioParameters const& NewParameters)
+		: m_InternalConverter(NewParameters)
+	{
+		m_InternalStream = std::move(StreamToConvert);
+		m_InternalConverter.InitializeInputParameters(m_InternalStream->GetAudioParameters());
+	}
+
+	//END AudioInputConverter
+
+
+
 
 	//BEGIN AsyncrousAudioBuffer 
 	AsyncrousAudioBuffer::AsyncrousAudioBuffer()
@@ -599,15 +647,19 @@ namespace MBMedia
 	{
 		return(m_InternalBuffer);
 	}
-	size_t AudioBuffer::GetSamplesCount()
+	const uint8_t* const* AudioBuffer::GetData() const
+	{
+		return(m_InternalBuffer);
+	}
+	size_t AudioBuffer::GetSamplesCount() const
 	{
 		return(m_StoredSamples);
 	}
-	size_t AudioBuffer::GetNumberOfPlanes()
+	size_t AudioBuffer::GetNumberOfPlanes() const
 	{
 		return(GetParametersDataPlanes(m_AudioParameters));
 	}
-	size_t AudioBuffer::GetPlaneSize()
+	size_t AudioBuffer::GetPlaneSize() const
 	{
 		return(GetChannelFrameSize(m_AudioParameters));
 	}

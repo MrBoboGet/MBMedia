@@ -65,6 +65,8 @@ namespace MBMedia
 		size_t AvailableSamples();
 	};
 
+
+	//Kommer nog reworka denna klass
 	class AudioDataConverter : public AudioStreamFilter
 	{
 	private:
@@ -85,6 +87,24 @@ namespace MBMedia
 		//void Flush() override;
 		~AudioDataConverter() override {}
 	};
+
+	class AudioInputConverter : public AudioStream
+	{
+	private:
+		std::unique_ptr<AudioStream> m_InternalStream = nullptr;
+		AudioParameters m_OutputParameters;
+		AudioDataConverter m_InternalConverter;
+	public:
+		AudioParameters GetAudioParameters() override;
+		size_t GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples, size_t OutputSampleOffset) override;
+		bool IsFinished() override;
+
+		AudioInputConverter(std::unique_ptr<AudioStream> StreamToConvert, AudioParameters const& NewParameters);
+
+		//void Flush() override;
+		~AudioInputConverter() override {}
+	};
+
 	class AsyncrousAudioBuffer : public MBMedia::AudioStream
 	{
 	private:
@@ -142,9 +162,10 @@ namespace MBMedia
 		AudioBuffer& operator=(AudioBuffer BufferToSteal);
 
 		uint8_t** GetData();
-		size_t GetSamplesCount();
-		size_t GetNumberOfPlanes();
-		size_t GetPlaneSize();
+		const uint8_t* const* GetData() const;
+		size_t GetSamplesCount() const;
+		size_t GetNumberOfPlanes() const;
+		size_t GetPlaneSize() const;
 
 		~AudioBuffer();
 	};
@@ -187,13 +208,12 @@ namespace MBMedia
 	{
 	private:
 		//std::vector<std::vector<std::string>> m_StoredSamples = {};
-		std::vector<MBMedia::AudioFIFOBuffer> m_StoredSamples = {};
 		size_t m_StoredSamplesCount = 0;
 		std::vector<std::unique_ptr<AudioStream>> m_InputSources = {};
 		MBMedia::AudioParameters m_OutputParameters;
 
-		std::vector<std::string> p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples);
-		void p_MixInputSources(std::vector<std::vector<std::string>> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset);
+		AudioBuffer p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples);
+		void p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset);
 	public:
 		void AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource);
 		void SetOutputParameters(MBMedia::AudioParameters const& NewParameters);
