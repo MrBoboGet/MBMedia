@@ -193,13 +193,17 @@ namespace MBMedia
 		MBMedia::AudioParameters m_OutputParameters;
 
 		std::vector<std::string> p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples);
-		void p_MixInputSources(std::vector<std::vector<std::string>> const& InputData, uint8_t** OutputData, size_t NumberOfSamples);
+		void p_MixInputSources(std::vector<std::vector<std::string>> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset);
 	public:
 		void AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource);
 		void SetOutputParameters(MBMedia::AudioParameters const& NewParameters);
 
+		size_t GetNumberOfSources() const;
+		AudioStream& GetAudioSource(size_t AudioSourceIndex);
+		void RemoveIndex(size_t IndexToRemove); 
+
 		virtual MBMedia::AudioParameters GetAudioParameters();
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples);
+		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset) override;
 		virtual bool IsFinished();
 		virtual ~AudioMixer() override {};
 	};

@@ -205,13 +205,7 @@ namespace MBMedia
 		//Passing nullptr flushes and returns the stored records untill the media type is null
 		//StreamFrame ConvertFrame(const StreamFrame* FrameToConvert);
 		//Because freeing a swrcontext before it is flushed we put this destructor here temporarily for debugging purposes
-		~FrameConverter()
-		{
-			if (!m_Flushed && IsInitialised())
-			{
-				throw std::exception();
-			}
-		}
+		~FrameConverter();
 	};
 
 	class StreamDecoder

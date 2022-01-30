@@ -177,6 +177,28 @@ namespace MBMedia
 	{
 		return(m_OutputParameters);
 	}
+	size_t AudioMixer::GetNumberOfSources() const
+	{
+		return(m_InputSources.size());
+	}
+	AudioStream& AudioMixer::GetAudioSource(size_t AudioSourceIndex)
+	{
+		if (AudioSourceIndex >= m_InputSources.size())
+		{
+			throw std::runtime_error("AudioSourceIndex out of range!");
+		}
+		return(*m_InputSources[AudioSourceIndex]);
+	}
+	void AudioMixer::RemoveIndex(size_t IndexToRemove)
+	{
+		if (IndexToRemove >= m_InputSources.size())
+		{
+			throw std::runtime_error("AudioSourceIndex out of range!");
+		}
+		//TODO kan optimeras, själva interfacen med
+		m_InputSources.erase(m_InputSources.begin() + IndexToRemove);
+		m_StoredSamples.erase(m_StoredSamples.begin() + IndexToRemove);
+	}
 	std::vector<std::string> AudioMixer::p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples)
 	{
 		AudioStream& CurrentSource = *m_InputSources[SourceIndex];
@@ -243,7 +265,7 @@ namespace MBMedia
 		*OutRecievedSamples = NumberOfSamples;
 		return(ReturnValue);
 	}
-	size_t AudioMixer::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples)
+	size_t AudioMixer::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset)
 	{
 		std::vector<std::vector<std::string>> TotalInputData = {};
 
@@ -266,18 +288,18 @@ namespace MBMedia
 			//int fått någon data, skriver bara 0
 			for (size_t i = 0; i < MBMedia::GetParametersDataPlanes(m_OutputParameters); i++)
 			{
-				std::memset(DataBuffer[i], 0, MBMedia::GetChannelFrameSize(m_OutputParameters) * NumberOfSamples);
+				std::memset(((uint8_t*)DataBuffer[i])+MBMedia::GetChannelFrameSize(m_OutputParameters)*BufferSampleOffset, 0, MBMedia::GetChannelFrameSize(m_OutputParameters) * NumberOfSamples);
 			}
 			return(0);
 		}
-#ifdef MBAE_VERIFY_AUDIO_DATA
-		assert(MBMedia::VerifySamples(DataBuffer, GetAudioParameters(), MaxRecievedSamples, 0));
+		p_MixInputSources(TotalInputData, DataBuffer, NumberOfSamples,BufferSampleOffset);
+#ifdef MBMEDIA_VERIFY_AUDIO_DATA
+		assert(MBMedia::VerifySamples(DataBuffer, GetAudioParameters(), MaxRecievedSamples, BufferSampleOffset));
 #endif // MBAE_VERIFY_AUDIO_DATA
 		//float* TestPointer = (float*)TotalInputData[0][0].data();
-		//p_MixInputSources(TotalInputData, DataBuffer,NumberOfSamples);
 		return(MaxRecievedSamples);
 	}
-	void AudioMixer::p_MixInputSources(std::vector<std::vector<std::string>> const& InputData, uint8_t** OutputData, size_t NumberOfSamples)
+	void AudioMixer::p_MixInputSources(std::vector<std::vector<std::string>> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset)
 	{
 		assert(InputData.size() == 1);
 		if (InputData.size() == 0)
@@ -294,7 +316,7 @@ namespace MBMedia
 		//h_ArrayIsAudiData(InputData[0][1].data(), NumberOfSamples);
 		for (size_t i = 0; i < MBMedia::GetParametersDataPlanes(m_OutputParameters); i++)
 		{
-			std::memcpy(OutputData[i], InputData[0][i].data(), NumberOfSamples * MBMedia::GetChannelFrameSize(m_OutputParameters));
+			std::memcpy(OutputData[i]+ MBMedia::GetChannelFrameSize(m_OutputParameters)*OutputSampleOffset, InputData[0][i].data(), NumberOfSamples * MBMedia::GetChannelFrameSize(m_OutputParameters));
 		}
 #ifdef MBMEDIA_VERIFY_AUDIO_DATA
 		assert(VerifySamples(OutputData, m_OutputParameters, NumberOfSamples));

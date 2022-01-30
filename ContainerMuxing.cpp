@@ -1138,6 +1138,14 @@ namespace MBMedia
 		m_Type = MediaType::Video;
 		m_VideoConverter = std::unique_ptr<VideoConverter>(new VideoConverter(InputTimebase, OldParameters, NewParameters));
 	}
+	FrameConverter::~FrameConverter()
+	{
+		if (!m_Flushed && IsInitialised())
+		{
+			//throw std::exception();
+			std::cout << "Frame converter not flushed!" << std::endl;
+		}
+	}
 	//END FrameConverter
 
 	//BEGIN StreamEncoder
