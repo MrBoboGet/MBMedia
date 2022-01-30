@@ -101,9 +101,9 @@ namespace MBMedia
 			}
 		}
 		m_StreamDecoder = std::unique_ptr<MBMedia::StreamDecoder>(new MBMedia::StreamDecoder(m_StreamDemuxer->GetStreamInfo(AudioIndex)));
-		MBMedia::AudioParameters NewParameters = m_StreamDecoder->GetAudioDecodeInfo().AudioInfo;
-		NewParameters.AudioFormat = MBMedia::GetPlanarAudioFormat(NewParameters.AudioFormat);
-		m_StreamDecoder->SetAudioConversionParameters(NewParameters, 2024);//Godtycklig framesize
+		//MBMedia::AudioParameters NewParameters = m_StreamDecoder->GetAudioDecodeInfo().AudioInfo;
+		//NewParameters.AudioFormat = MBMedia::GetPlanarAudioFormat(NewParameters.AudioFormat);
+		//m_StreamDecoder->SetAudioConversionParameters(NewParameters, 2024);//Godtycklig framesize
 		m_AudioStreamIndex = AudioIndex;
 	}
 	MBMedia::AudioParameters AudioOctetStreamer::GetAudioParameters()
@@ -160,11 +160,13 @@ namespace MBMedia
 		size_t SamplesToWrite = NumberOfSamples > CurrentFrameSamples ? CurrentFrameSamples : NumberOfSamples;
 		MBMedia::AudioParameters AudioParameters = m_DecodedFrames.front().GetAudioParameters();
 		MBMedia::SampleFormatInfo SampleFormatInfo = MBMedia::GetSampleFormatInfo(AudioParameters.AudioFormat);
-		size_t CurrentByteOffset = m_CurrentFrameSampleOffset * (SampleFormatInfo.SampleSize);
-		for (size_t i = 0; i < AudioParameters.NumberOfChannels; i++)
+		const size_t CurrentInputOffset = m_CurrentFrameSampleOffset * GetChannelFrameSize(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo);
+		const size_t CurrentOutputOffset = SampleOffset * GetChannelFrameSize(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo);
+		const size_t SamplesToWriteSize = SamplesToWrite* GetChannelFrameSize(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo);
+		for (size_t i = 0; i < GetParametersDataPlanes(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo); i++)
 		{
 			float* TestPointer = (float*)m_DecodedFrames.front().GetData()[i];
-			std::memcpy(OutData[i] + SampleOffset * SampleFormatInfo.SampleSize, m_DecodedFrames.front().GetData()[i] + CurrentByteOffset, SamplesToWrite * SampleFormatInfo.SampleSize);
+			std::memcpy(OutData[i] + CurrentOutputOffset, m_DecodedFrames.front().GetData()[i] + CurrentInputOffset, SamplesToWriteSize);
 		}
 		size_t NumberOfFrames = m_DecodedFrames.front().GetAudioFrameInfo().NumberOfSamples;
 		float* TestPointer = (float*)m_DecodedFrames.front().GetData()[0];
@@ -201,7 +203,7 @@ namespace MBMedia
 			OutputBuffer[i] = DataBuffer[i] + (GetChannelFrameSize(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo) * OutputSamplesOffset);
 		}
 
-		MBMedia::AudioParameters AudioParameters = m_StreamDecoder->GetAudioDecodeInfo().AudioInfo;
+		MBMedia::AudioParameters OutputParameters = m_StreamDecoder->GetAudioDecodeInfo().AudioInfo;
 		size_t ExtractedSamples = 0;
 		while (!IsFinished())
 		{
@@ -213,9 +215,9 @@ namespace MBMedia
 		}
 		if (ExtractedSamples < NumberOfSamples)
 		{
-			size_t OutputByteOffset = ExtractedSamples * MBMedia::GetSampleFormatInfo(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo.AudioFormat).SampleSize;
-			size_t TotalOutputWidth = NumberOfSamples * MBMedia::GetSampleFormatInfo(m_StreamDecoder->GetAudioDecodeInfo().AudioInfo.AudioFormat).SampleSize;
-			for (size_t i = 0; i < AudioParameters.NumberOfChannels; i++)
+			size_t OutputByteOffset = ExtractedSamples * GetChannelFrameSize(OutputParameters);
+			size_t TotalOutputWidth = NumberOfSamples * GetChannelFrameSize(OutputParameters);
+			for (size_t i = 0; i < GetParametersDataPlanes(OutputParameters); i++)
 			{
 				std::memset(OutputBuffer.data()[i] + OutputByteOffset, 0, TotalOutputWidth - OutputByteOffset);
 			}
@@ -225,7 +227,7 @@ namespace MBMedia
 		//h_ArrayIsAudiData(DataBuffer[0], ExtractedSamples);
 		//h_ArrayIsAudiData(DataBuffer[1], ExtractedSamples);
 #ifdef MBMEDIA_VERIFY_AUDIO_DATA
-		assert(MBMedia::VerifySamples(OutputBuffer.data(), GetAudioParameters(), ExtractedSamples, 0));
+		assert(MBMedia::VerifySamples(OutputBuffer.data(), GetAudioParameters(), ExtractedSamples, OutputSamplesOffset));
 #endif // MBAE_VERIFY_AUDIO_DATA
 
 		return(ExtractedSamples);

@@ -1,4 +1,6 @@
 #pragma once
+#define NOMINMAX
+
 #include "MBAudioDefinitions.h"
 #include "DoNothing.h"
 #include <stdint.h>
@@ -74,6 +76,8 @@ namespace MBMedia
 		AudioFIFOBuffer m_AudioBuffer;
 		AudioParameters m_InputParameters;
 		AudioParameters m_OutputParameters;
+
+		bool m_Finished = false;
 	public:
 		AudioDataConverter(AudioParameters const& InputParameters, AudioParameters const& OutputParameters);
 		//finns inte riktigt något sätt att verifiera att input datan är korrekt formatterad efter AudioParamters klassen, men är den ej det är det
@@ -152,7 +156,9 @@ namespace MBMedia
 		uint8_t** m_InternalBuffer = nullptr;
 		AudioParameters m_AudioParameters;
 		size_t m_StoredSamples = 0;
+		size_t m_SampleCapacity = 0;
 
+		static constexpr double i_BufferGrowthSize = 1.5;
 	public:
 		AudioBuffer();
 		
@@ -166,7 +172,16 @@ namespace MBMedia
 		size_t GetSamplesCount() const;
 		size_t GetNumberOfPlanes() const;
 		size_t GetPlaneSize() const;
+		AudioParameters GetAudioParameters() const;
 
+		size_t CopyData(uint8_t** OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const;
+		size_t CopyData(AudioBuffer& OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const;
+
+		void Resize(size_t TotalSize);
+		void Reserve(size_t TotalSize);
+
+		friend AudioBuffer operator+(AudioBuffer LeftBuffer, AudioBuffer const& RightBuffer);
+		AudioBuffer& operator+=(AudioBuffer const& BufferToAdd);
 		~AudioBuffer();
 	};
 	class AudioPipeline : public AudioStream

@@ -1,4 +1,5 @@
 #pragma once
+#define NOMINMAX
 
 #define MBMEDIA_VERIFY_AUDIO_DATA
 

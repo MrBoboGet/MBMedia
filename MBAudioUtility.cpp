@@ -402,15 +402,20 @@ namespace MBMedia
 		assert(VerifySamples(DataToInsert, m_InputParameters, NumberOfSamples, 0));
 #endif
 		m_AudioBuffer.InsertData(DataToInsert, NumberOfSamples, InputSamplesOffset);
+		m_Finished = false;
 	}
 	size_t AudioDataConverter::AvailableSamples()
 	{
+		if (m_Finished)
+		{
+			return(0);
+		}
 		SwrContext* ConversionContext = (SwrContext*)m_ConversionContext.get();
 		int ReturnValue = swr_get_out_samples(ConversionContext, m_AudioBuffer.AvailableSamples());
 		FFMPEGCall(ReturnValue);
 		if (ReturnValue < 0)
 		{
-			return(-1);
+			return(0);
 		}
 		else
 		{
@@ -438,12 +443,16 @@ namespace MBMedia
 		else
 		{
 			Result = swr_convert(ConversionContext, OutputPointers.data(), NumberOfSamples, nullptr, 0);
+			if (Result <= 0)
+			{
+				m_Finished = true;
+			}
 		}
 		m_AudioBuffer.DiscardSamples(m_AudioBuffer.AvailableSamples());
 		FFMPEGCall(Result);
 		if (Result < 0)
 		{
-			return(-1);
+			return(0);
 		}
 		else
 		{
@@ -614,6 +623,7 @@ namespace MBMedia
 	{
 		m_AudioParameters = AudioParameters;
 		m_StoredSamples = NumberOfSamples;
+		m_SampleCapacity = NumberOfSamples;
 		m_InternalBuffer = new uint8_t * [GetParametersDataPlanes(AudioParameters)];
 		size_t PlaneSize = GetChannelFrameSize(AudioParameters) * NumberOfSamples;
 		for (size_t i = 0; i < GetParametersDataPlanes(AudioParameters) ; i++)
@@ -663,6 +673,34 @@ namespace MBMedia
 	{
 		return(GetChannelFrameSize(m_AudioParameters));
 	}
+	AudioParameters AudioBuffer::GetAudioParameters() const
+	{
+		return(m_AudioParameters);
+	}
+	size_t AudioBuffer::CopyData(uint8_t** OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const
+	{
+		size_t SamplesToTransfer = std::min(m_StoredSamples - InputOffset, SamplesToCopy);
+		if (SamplesToTransfer == 0)
+		{
+			return SamplesToTransfer;
+		}
+		const size_t InputByteOffset = InputOffset * GetChannelFrameSize(m_AudioParameters);
+		const size_t OutputByteOffset = OutputOffset * GetChannelFrameSize(m_AudioParameters);
+		const size_t SamplesToCopySize = SamplesToCopy * GetChannelFrameSize(m_AudioParameters);
+		for (size_t i = 0; i < GetParametersDataPlanes(m_AudioParameters); i++)
+		{
+			std::memcpy(OutputBuffer[i]+ OutputByteOffset, m_InternalBuffer[i]+InputByteOffset, SamplesToCopySize);
+		}
+		return(SamplesToTransfer);
+	}
+	size_t AudioBuffer::CopyData(AudioBuffer& OutputBuffer, size_t OutputOffset, size_t InputOffset, size_t SamplesToCopy) const
+	{
+		if (OutputBuffer.GetAudioParameters() != m_AudioParameters)
+		{
+			throw std::runtime_error("Outputbuffer doesn't have the same audio parameters");
+		}
+		return(CopyData(OutputBuffer.GetData(), OutputOffset, InputOffset,SamplesToCopy));
+	}
 	AudioBuffer::~AudioBuffer()
 	{
 		if (m_InternalBuffer != nullptr)
@@ -673,6 +711,56 @@ namespace MBMedia
 			}
 		}
 		delete[] m_InternalBuffer;
+	}
+	void AudioBuffer::Resize(size_t TotalSize)
+	{
+		Reserve(TotalSize);
+		m_StoredSamples = TotalSize;
+	}
+	void AudioBuffer::Reserve(size_t TotalSize)
+	{
+		if (m_SampleCapacity >= TotalSize || TotalSize < m_StoredSamples)
+		{
+			return;
+		}
+		uint8_t** NewDataPointers = new uint8_t * [GetParametersDataPlanes(m_AudioParameters)];
+		const size_t StoredDataPlaneSize = m_StoredSamples * GetChannelFrameSize(m_AudioParameters);
+		const size_t NewDataPlaneSize = TotalSize * GetChannelFrameSize(m_AudioParameters);
+		for (size_t i = 0; i < GetParametersDataPlanes(m_AudioParameters); i++)
+		{
+			NewDataPointers[i] = new uint8_t[GetChannelFrameSize(m_AudioParameters) * TotalSize];
+			std::memcpy(NewDataPointers[i], m_InternalBuffer[i], StoredDataPlaneSize);
+			std::memset(NewDataPointers[i] + StoredDataPlaneSize, 0, NewDataPlaneSize - StoredDataPlaneSize);
+			delete[] m_InternalBuffer[i];
+		}
+		delete[] m_InternalBuffer;
+		m_InternalBuffer = NewDataPointers;
+		m_SampleCapacity = TotalSize;
+	}
+
+	AudioBuffer operator+(AudioBuffer LeftBuffer, AudioBuffer const& RightBuffer)
+	{
+		LeftBuffer += RightBuffer;
+		return(LeftBuffer);
+	}
+	AudioBuffer& AudioBuffer::operator+=(AudioBuffer const& BufferToAdd)
+	{
+		if (m_AudioParameters != BufferToAdd.m_AudioParameters)
+		{
+			throw std::runtime_error("Buffers doesn't have the same audio parameters");
+		}
+		size_t AvailableSamples = m_SampleCapacity - m_StoredSamples;
+		if (AvailableSamples < BufferToAdd.m_StoredSamples)
+		{
+			Reserve((m_StoredSamples + BufferToAdd.m_StoredSamples) * i_BufferGrowthSize);
+		}
+		const size_t DataToCopySize = BufferToAdd.m_StoredSamples * (GetChannelFrameSize(m_AudioParameters));
+		const size_t BufferOffset = m_StoredSamples* (GetChannelFrameSize(m_AudioParameters));
+		for (size_t i = 0; i < GetParametersDataPlanes(m_AudioParameters); i++)
+		{
+			std::memcpy(m_InternalBuffer[i]+BufferOffset, BufferToAdd.m_InternalBuffer[i], DataToCopySize);
+		}
+		m_StoredSamples += BufferToAdd.m_StoredSamples;
 	}
 	//END AudioBuffer
 

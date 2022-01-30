@@ -1,4 +1,5 @@
 #pragma once
+#define NOMINMAX
 
 #include <MBUtility/MBInterfaces.h>
 

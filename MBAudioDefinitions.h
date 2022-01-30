@@ -1,4 +1,6 @@
 #pragma once
+#define NOMINMAX
+
 #include <stdint.h>
 #include <cstddef>
 namespace MBMedia

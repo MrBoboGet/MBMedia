@@ -588,6 +588,24 @@ namespace MBMedia
 		ReturnValue.AudioInfo.SampleRate = CodecContext->sample_rate;
 		ReturnValue.AudioInfo.NumberOfChannels = CodecContext->channels;
 		ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		//TODO undersök det här närmare, vad innebär det egentligen om layouten är 0?
+		if (CodecContext->channel_layout == 0)
+		{
+			if (ReturnValue.AudioInfo.NumberOfChannels == 2)
+			{
+				ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_STEREO);
+			}
+			else if(ReturnValue.AudioInfo.NumberOfChannels == 1)
+			{
+				ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_MONO);
+			}
+			else
+			{
+				throw std::runtime_error("Layout is 0 but channel count isn't 1 or 2");
+			}
+		}
+
+
 		ReturnValue.FrameSize = CodecContext->frame_size;
 		ReturnValue.AverageBitrate = CodecContext->bit_rate;
 		ReturnValue.StreamTimebase = GetStreamTimebase();
