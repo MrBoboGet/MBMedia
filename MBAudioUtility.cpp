@@ -36,7 +36,7 @@ namespace MBMedia
 			return(m_InputFormatInfo.SampleSize);
 		}
 	}
-	uint8_t** AudioFIFOBuffer::GetBuffer()
+	uint8_t* const* AudioFIFOBuffer::GetBuffer()
 	{
 		if (m_IsInitialized == false)
 		{
@@ -96,11 +96,11 @@ namespace MBMedia
 		}
 		m_StoredSamples += NumberOfSamples;
 	}
-	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead)
+	size_t AudioFIFOBuffer::ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead)
 	{
 		return(ReadData(OutputBuffers, NumberOfSamplesToRead, 0));
 	}
-	size_t AudioFIFOBuffer::ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset)
+	size_t AudioFIFOBuffer::ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset)
 	{
 		if (!m_IsInitialized)
 		{
@@ -150,7 +150,7 @@ namespace MBMedia
 			}
 		}
 	}
-	size_t AudioFIFOBuffer::AvailableSamples()
+	size_t AudioFIFOBuffer::AvailableSamples() const
 	{
 		if (!m_IsInitialized)
 		{
@@ -227,7 +227,7 @@ namespace MBMedia
 		*OutRecievedSamples = RecievedSamples;
 		return(ReturnValue);
 	}
-	size_t AudioMixer::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset)
+	size_t AudioMixer::GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset)
 	{
 		std::vector<AudioBuffer> TotalInputData = {};
 
@@ -278,7 +278,7 @@ namespace MBMedia
 		}
 	}
 
-	void AudioMixer::p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset)
+	void AudioMixer::p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t* const* OutputData, size_t NumberOfSamples,size_t OutputSampleOffset)
 	{
 		if (InputData.size() == 0)
 		{
@@ -437,7 +437,7 @@ namespace MBMedia
 	//{
 	//	//TODO implementera xd
 	//}
-	size_t AudioDataConverter::GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples,size_t OutputSampleOffset)
+	size_t AudioDataConverter::GetNextSamples(uint8_t* const* OutputBuffer, size_t NumberOfSamples,size_t OutputSampleOffset)
 	{
 		SwrContext* ConversionContext = (SwrContext*)m_ConversionContext.get();
 		size_t ConvertedSamples = -1;
@@ -480,7 +480,7 @@ namespace MBMedia
 	{
 		return(m_OutputParameters);
 	}
-	size_t AudioInputConverter::GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples, size_t OutputSampleOffset)
+	size_t AudioInputConverter::GetNextSamples(uint8_t* const* OutputBuffer, size_t NumberOfSamples, size_t OutputSampleOffset)
 	{
 		const size_t DataFetchChunk = 4096;
 		AudioBuffer TempBuffer = AudioBuffer(m_InternalStream->GetAudioParameters(), DataFetchChunk);
@@ -576,7 +576,7 @@ namespace MBMedia
 		}
 		AssociatedObject->m_StreamFinished.store(true);
 	}
-	size_t AsyncrousAudioBuffer::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleoffset)
+	size_t AsyncrousAudioBuffer::GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleoffset)
 	{
 		//returnar alltid alla samples även om dem inte finns sparade, kanske borde vänta vem vet?
 		size_t ReturnValue = 0;
@@ -664,7 +664,7 @@ namespace MBMedia
 		return(*this);
 	}
 
-	uint8_t** AudioBuffer::GetData()
+	uint8_t* const* AudioBuffer::GetData()
 	{
 		return(m_InternalBuffer);
 	}
@@ -688,7 +688,7 @@ namespace MBMedia
 	{
 		return(m_AudioParameters);
 	}
-	size_t AudioBuffer::CopyData(uint8_t** OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const
+	size_t AudioBuffer::CopyData(uint8_t* const* OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const
 	{
 		size_t SamplesToTransfer = std::min(m_StoredSamples - InputOffset, SamplesToCopy);
 		if (SamplesToTransfer == 0)
@@ -808,7 +808,7 @@ namespace MBMedia
 			}
 		}
 	}
-	size_t AudioPipeline::p_ExtractFilterSamples(uint8_t** ByteBuffer, size_t FilterIndex, size_t NumberOfSamples,size_t OutputSampleOffset)
+	size_t AudioPipeline::p_ExtractFilterSamples(uint8_t* const* ByteBuffer, size_t FilterIndex, size_t NumberOfSamples,size_t OutputSampleOffset)
 	{
 		if (FilterIndex == -1)
 		{
@@ -860,7 +860,7 @@ namespace MBMedia
 #endif // 
 		return(ExtractedSamples);
 	}
-	size_t AudioPipeline::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffseet)
+	size_t AudioPipeline::GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffseet)
 	{
 		size_t ExtractedSamples = 0;
 		if (m_IntermediaryFilters.size() == 0)

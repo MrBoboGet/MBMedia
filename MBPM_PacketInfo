@@ -7,6 +7,6 @@
 		"StaticRelease": "MBMedia_SR",
 		"StaticDebug": "MBMedia_SD"
 	},
-	"Dependancies": []
+	"Dependancies": ["ffmpeg"]
 
 }

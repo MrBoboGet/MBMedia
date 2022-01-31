@@ -56,15 +56,15 @@ namespace MBMedia
 
 		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples);
 		void InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples, size_t InputSampleOffset);
-		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead);
-		size_t ReadData(uint8_t** OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset);
+		size_t ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead);
+		size_t ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset);
 
-		uint8_t** GetBuffer();
-		const uint8_t* const* GetBuffer() const;
+		uint8_t* const* GetBuffer();
+		uint8_t const* const* GetBuffer() const;
 
 		void DiscardSamples(size_t SamplesToDiscard);
 
-		size_t AvailableSamples();
+		size_t AvailableSamples() const;
 	};
 
 
@@ -87,7 +87,7 @@ namespace MBMedia
 		AudioParameters GetAudioParameters() override;
 		void InsertData(const uint8_t* const* DataToInsert, size_t NumberOfSamples,size_t InputSampleOffset) override;
 		size_t AvailableSamples() override;//frames eller samples, vet inte riktigt än...
-		size_t GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
+		size_t GetNextSamples(uint8_t* const* OutputBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
 		//void Flush() override;
 		~AudioDataConverter() override {}
 	};
@@ -100,7 +100,7 @@ namespace MBMedia
 		AudioDataConverter m_InternalConverter;
 	public:
 		AudioParameters GetAudioParameters() override;
-		size_t GetNextSamples(uint8_t** OutputBuffer, size_t NumberOfSamples, size_t OutputSampleOffset) override;
+		size_t GetNextSamples(uint8_t* const* OutputBuffer, size_t NumberOfSamples, size_t OutputSampleOffset) override;
 		bool IsFinished() override;
 
 		AudioInputConverter(std::unique_ptr<AudioStream> StreamToConvert, AudioParameters const& NewParameters);
@@ -144,7 +144,7 @@ namespace MBMedia
 
 
 		virtual MBMedia::AudioParameters GetAudioParameters() override;
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
+		virtual size_t GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
 		virtual bool IsFinished() override;
 	
 		~AsyncrousAudioBuffer() override;
@@ -167,14 +167,14 @@ namespace MBMedia
 		AudioBuffer(AudioBuffer&& BufferToSteal) noexcept;
 		AudioBuffer& operator=(AudioBuffer BufferToSteal);
 
-		uint8_t** GetData();
-		const uint8_t* const* GetData() const;
+		uint8_t* const* GetData();
+		uint8_t const* const* GetData() const;
 		size_t GetSamplesCount() const;
 		size_t GetNumberOfPlanes() const;
 		size_t GetPlaneSize() const;
 		AudioParameters GetAudioParameters() const;
 
-		size_t CopyData(uint8_t** OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const;
+		size_t CopyData(uint8_t* const* OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const;
 		size_t CopyData(AudioBuffer& OutputBuffer, size_t OutputOffset, size_t InputOffset,size_t SamplesToCopy) const;
 
 		void Resize(size_t TotalSize);
@@ -194,10 +194,10 @@ namespace MBMedia
 
 		//void p_InitializeFilters();
 
-		size_t p_ExtractFilterSamples(uint8_t** ByteBuffer, size_t FilterIndex, size_t NumberOfSamples, size_t OutputSampleOffset);
+		size_t p_ExtractFilterSamples(uint8_t* const* ByteBuffer, size_t FilterIndex, size_t NumberOfSamples, size_t OutputSampleOffset);
 	public:
 		virtual MBMedia::AudioParameters GetAudioParameters() override;
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
+		virtual size_t GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
 		virtual bool IsFinished() override;
 		virtual ~AudioPipeline() override {};
 
@@ -229,7 +229,7 @@ namespace MBMedia
 		MBMedia::AudioParameters m_OutputParameters;
 
 		AudioBuffer p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples);
-		void p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset);
+		void p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t* const* OutputData, size_t NumberOfSamples,size_t OutputSampleOffset);
 	public:
 		void AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource);
 		void AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource,float VolumeCoefficient);
@@ -240,7 +240,7 @@ namespace MBMedia
 		void RemoveIndex(size_t IndexToRemove); 
 
 		virtual MBMedia::AudioParameters GetAudioParameters();
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset) override;
+		virtual size_t GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t BufferSampleOffset) override;
 		virtual bool IsFinished();
 		virtual ~AudioMixer() override {};
 	};

@@ -187,7 +187,7 @@ namespace MBMedia
 		}
 		return(SamplesToWrite);
 	}
-	size_t AudioOctetStreamer::GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSamplesOffset)
+	size_t AudioOctetStreamer::GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSamplesOffset)
 	{
 		if (m_StreamDecoder == nullptr)
 		{

@@ -42,7 +42,7 @@ namespace MBMedia
 		AudioOctetStreamer(std::unique_ptr<MBUtility::MBSearchableInputStream> InputStream, MBMedia::AudioParameters const& OutputParameters);
 		AudioOctetStreamer(std::unique_ptr<MBUtility::MBSearchableInputStream> InputStream);
 		virtual MBMedia::AudioParameters GetAudioParameters() override;
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSamplesOffset) override;
+		virtual size_t GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSamplesOffset) override;
 		virtual bool IsFinished() override;
 		virtual ~AudioOctetStreamer() {};
 	};

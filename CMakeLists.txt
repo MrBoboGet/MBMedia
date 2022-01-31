@@ -2,8 +2,25 @@ project(MBMedia)
 set(PROJECT_NAME "MBMedia")
 ##BEGIN MBPM_VARIABLES
 set(MBPM_DEPENDENCIES 
-	#ffmpeg
-	MBUtility
+	"ffmpeg#avformat"
+	"ffmpeg#avcodec"
+	"ffmpeg#avdevice"
+	"ffmpeg#avfilter"
+	"ffmpeg#avutil"
+	"ffmpeg#swresample"
+	"ffmpeg#swscale"
+)
+set(MBPM_SystemLibraries
+Ws2_32.lib
+Secur32.lib
+Bcrypt.lib
+Mfplat.lib
+opengl32
+Mfuuid.lib
+	Strmiids.lib
+)
+set(MBPM_DependanciesIncludeDirectories
+$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg//
 )
 set(MBPM_TARGET_EXTPACKET_LIBRARIES )
 set(MBPM_TARGET_COMPILE_OPTIONS )
@@ -20,11 +37,18 @@ macro(MBPM_UpdateLibraries TargetToUpdate LinkType BuildType)
 	set(MBPM_TARGET_EXTPACKET_LIBRARIES "")
 	foreach(PACKET IN LISTS MBPM_DEPENDENCIES)
 		set(NewLibraryName "")
-		set(NewLibraryToAdd "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/${PACKET}/MBPM_Builds/")
+		set(PacketName ${PACKET})
+		set(LibraryName ${PACKET})
+		if(${PACKET} MATCHES "#")
+			string(REPLACE "#" ";" PACKET_PART_LIST ${PACKET})
+			list(GET PACKET_PART_LIST 0 PacketName)
+			list(GET PACKET_PART_LIST 1 LibraryName)
+		endif()
+		set(NewLibraryToAdd "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/${PacketName}/MBPM_Builds/")
 		if(${LinkType} STREQUAL "STATIC")
-			set(NewLibraryName "${PACKET}_S")
+			set(NewLibraryName "${LibraryName}_S")
 		elseif(${LinkType} STREQUAL "DYNAMIC")
-			set(NewLibraryName "${PACKET}_D")
+			set(NewLibraryName "${LibraryName}_D")
 		endif()
 		if(${BuildType} STREQUAL "DEBUG")
 			set(NewLibraryName "${NewLibraryName}D")
@@ -86,14 +110,15 @@ endmacro()
 
 macro(MBPM_LinkTargetPacketLibraries Target)
 	target_link_libraries(${Target} ${MBPM_TARGET_EXTPACKET_LIBRARIES})
+	target_link_libraries(${Target} ${MBPM_SystemLibraries})
 endmacro()
 
 macro(MBPM_SetTargetIncludeDirectories Target)
 	target_include_directories(${Target} PUBLIC 
 	"${CMAKE_CURRENT_SOURCE_DIR}/"
 	"$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/"
-	"$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/MBUtility/"
 	)
+	target_include_directories(${Target} PUBLIC ${MBPM_DependanciesIncludeDirectories})
 endmacro()
 
 macro(MBPM_ApplyTargetConfiguration TargetToUpdate LinkType BuildType)
@@ -113,30 +138,30 @@ set(PROJECT_SOURCES
 set(PROJECT_HEADERS 
 	"${CMAKE_CURRENT_SOURCE_DIR}//MBMedia.h"
 )
-set(COMMON_INCLUDE_DIRECTORIES
-   "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/" 
-)
+#set(COMMON_INCLUDE_DIRECTORIES
+#   "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/" 
+#)
 set(COMMON_FILES ${PROJECT_SOURCES} ${PROJECT_HEADERS})
 set(COMMON_DYNAMIC_LIBRARIES 
 )
-set (FFMPEG_LIBS
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavformat/libavformat.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavcodec/libavcodec.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavdevice/libavdevice.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavfilter/libavfilter.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavutil/libavutil.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswresample/libswresample.lib"
-    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswscale/libswscale.lib"
-)
-set(COMMON_STATIC_LIBRARIES
-    ${FFMPEG_LIBS}
-	"Ws2_32.lib"
-	"Secur32.lib"
-    "Bcrypt.lib"
-    "Mfplat.lib"
-    "Mfuuid.lib"
-    "Strmiids.lib"
-)
+#set (FFMPEG_LIBS
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavformat/libavformat.lib"
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavcodec/libavcodec.lib"
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavdevice/libavdevice.lib"
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavfilter/libavfilter.lib"
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libavutil/libavutil.lib"
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswresample/libswresample.lib"
+#    "$ENV{MBPM_PACKETS_INSTALL_DIRECTORY}/ffmpeg/libswscale/libswscale.lib"
+#)
+#set(COMMON_STATIC_LIBRARIES
+#    ${FFMPEG_LIBS}
+#	"Ws2_32.lib"
+#	"Secur32.lib"
+#    "Bcrypt.lib"
+#    "Mfplat.lib"
+#    "Mfuuid.lib"
+#    "Strmiids.lib"
+#)
 set(COMMON_LIBRARIES ${COMMON_STATIC_LIBRARIES} ${COMMON_DYNAMIC_LIBRARIES})
 
 set(EXECUTABLE_FILES
@@ -160,4 +185,4 @@ MBPM_ApplyTargetConfiguration("MBMediaTest" "STATIC" "DEBUG")
 target_compile_features("MBMediaTest" PRIVATE cxx_std_17)
 target_link_libraries("MBMediaTest" ${COMMON_LIBRARIES})
 MBPM_LinkTargetPacketLibraries("MBMediaTest")
-target_include_directories("MBMediaTest" PRIVATE ${COMMON_INCLUDE_DIRECTORIES})
+#target_include_directories("MBMediaTest" PRIVATE ${COMMON_INCLUDE_DIRECTORIES})

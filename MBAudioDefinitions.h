@@ -61,7 +61,7 @@ namespace MBMedia
 
 	public:
 		virtual MBMedia::AudioParameters GetAudioParameters() = 0;
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) = 0;
+		virtual size_t GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) = 0;
 		virtual bool IsFinished() = 0;
 		virtual ~AudioStream()
 		{
@@ -75,7 +75,7 @@ namespace MBMedia
 		virtual void InsertData(const uint8_t* const* InputData, size_t NumberOfFrames,size_t InputFrameOffset) = 0;
 		virtual size_t AvailableSamples() = 0;
 		virtual MBMedia::AudioParameters GetAudioParameters() = 0;
-		virtual size_t GetNextSamples(uint8_t** DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) = 0;
+		virtual size_t GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) = 0;
 		//virtual void Flush() = 0;
 		virtual ~AudioStreamFilter() 
 		{
