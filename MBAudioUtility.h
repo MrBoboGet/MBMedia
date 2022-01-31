@@ -225,12 +225,14 @@ namespace MBMedia
 		//std::vector<std::vector<std::string>> m_StoredSamples = {};
 		size_t m_StoredSamplesCount = 0;
 		std::vector<std::unique_ptr<AudioStream>> m_InputSources = {};
+		std::vector<float> m_InputVolumes = {};
 		MBMedia::AudioParameters m_OutputParameters;
 
 		AudioBuffer p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples);
 		void p_MixInputSources(std::vector<AudioBuffer> const& InputData, uint8_t** OutputData, size_t NumberOfSamples,size_t OutputSampleOffset);
 	public:
 		void AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource);
+		void AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource,float VolumeCoefficient);
 		void SetOutputParameters(MBMedia::AudioParameters const& NewParameters);
 
 		size_t GetNumberOfSources() const;

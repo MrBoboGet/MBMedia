@@ -167,12 +167,17 @@ namespace MBMedia
 	{
 		//m_StoredSamples.push_back(std::vector<std::string>(NewAudioSource->GetAudioParameters().NumberOfChannels, std::string()));
 		//m_StoredSamples.push_back(MBMedia::AudioFIFOBuffer(NewAudioSource->GetAudioParameters(), 4096));//totalt godtycklig
+		AddAudioSource(std::move(NewAudioSource), 1);
+	}
+	void AudioMixer::AddAudioSource(std::unique_ptr<AudioStream> NewAudioSource, float VolumeCoefficient)
+	{
 		if (NewAudioSource->GetAudioParameters() != m_OutputParameters)
 		{
 			//NewAudioSource = std::unique_ptr<AudioStream>(new AudioDataConverter( std::move()
 			NewAudioSource = std::unique_ptr<AudioStream>(new AudioInputConverter(std::move(NewAudioSource), m_OutputParameters));
 		}
 		m_InputSources.push_back(std::move(NewAudioSource));
+		m_InputVolumes.push_back(VolumeCoefficient);
 	}
 	void AudioMixer::SetOutputParameters(MBMedia::AudioParameters const& NewParameters)
 	{
@@ -202,6 +207,7 @@ namespace MBMedia
 		}
 		//TODO kan optimeras, själva interfacen med
 		m_InputSources.erase(m_InputSources.begin() + IndexToRemove);
+		m_InputVolumes.erase(m_InputVolumes.begin() + IndexToRemove);
 		//m_AudioConverters.erase(m_AudioConverters.begin() + IndexToRemove);
 	}
 	AudioBuffer AudioMixer::p_GetSourceData(size_t SourceIndex, size_t NumberOfSamples, size_t* OutRecievedSamples)
@@ -256,7 +262,7 @@ namespace MBMedia
 		return(MaxRecievedSamples);
 	}
 	template<typename T> 
-	void h_AddBuffers(const void** InBuffers_, void* OutBuffer_,size_t NumberOfBuffers,size_t BufferLength)
+	void h_AddBuffers(const void** InBuffers_, void* OutBuffer_,size_t NumberOfBuffers,size_t BufferLength,float* VolumeCoeffiecient)
 	{
 		const T* const* InBuffers = (const T* const*)InBuffers_;
 		T* OutBuffer = (T*)OutBuffer_;
@@ -266,7 +272,7 @@ namespace MBMedia
 			T Result = 0;
 			for(size_t j = 0; j < NumberOfBuffers;j++)
 			{
-				Result += InBuffers[j][i];
+				Result += InBuffers[j][i]* VolumeCoeffiecient[j];
 			}
 			OutBuffer[i] = Result;
 		}
@@ -305,23 +311,28 @@ namespace MBMedia
 			}
 			if (m_OutputParameters.AudioFormat == SampleFormat::DBL || m_OutputParameters.AudioFormat == SampleFormat::DBLP)
 			{
-				h_AddBuffers<double>((const void**)DataPlanes, (void*)(OutputData[i]+GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+				h_AddBuffers<double>((const void**)DataPlanes, (void*)(OutputData[i]+GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), 
+					SamplesPerPlane,m_InputVolumes.data());
 			}
 			else if (m_OutputParameters.AudioFormat == SampleFormat::FLTP || m_OutputParameters.AudioFormat == SampleFormat::FLT)
 			{
-				h_AddBuffers<float>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+				h_AddBuffers<float>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane,
+					 m_InputVolumes.data());
 			}
-			else if (m_OutputParameters.AudioFormat == SampleFormat::S16 || m_OutputParameters.AudioFormat == SampleFormat::S16)
+			else if (m_OutputParameters.AudioFormat == SampleFormat::S16 || m_OutputParameters.AudioFormat == SampleFormat::S16P)
 			{
-				h_AddBuffers<int16_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+				h_AddBuffers<int16_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane,
+					m_InputVolumes.data());
 			}
-			else if (m_OutputParameters.AudioFormat == SampleFormat::S32 || m_OutputParameters.AudioFormat == SampleFormat::S32)
+			else if (m_OutputParameters.AudioFormat == SampleFormat::S32 || m_OutputParameters.AudioFormat == SampleFormat::S32P)
 			{
-				h_AddBuffers<int32_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+				h_AddBuffers<int32_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane,
+					m_InputVolumes.data());
 			}
-			else if (m_OutputParameters.AudioFormat == SampleFormat::U8 || m_OutputParameters.AudioFormat == SampleFormat::U8)
+			else if (m_OutputParameters.AudioFormat == SampleFormat::U8 || m_OutputParameters.AudioFormat == SampleFormat::U8P)
 			{
-				h_AddBuffers<uint8_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane);
+				h_AddBuffers<uint8_t>((const void**)DataPlanes, (void*)(OutputData[i] + GetChannelFrameSize(m_OutputParameters) * OutputSampleOffset), InputData.size(), SamplesPerPlane,
+					m_InputVolumes.data());
 			}
 			delete[] DataPlanes;
 		}
