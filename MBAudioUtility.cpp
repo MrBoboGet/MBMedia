@@ -140,14 +140,16 @@ namespace MBMedia
 	}
 	void AudioFIFOBuffer::p_ResizeBuffers()
 	{
-		//TODO använder godtycklig heuristic, kanske vill antingen stora dem som en linked lista eller faktiskt undersöka hur man ska göra?
+		//TODO anvï¿½nder godtycklig heuristic, kanske vill antingen stora dem som en linked lista eller faktiskt undersï¿½ka hur man ska gï¿½ra?
 		if (m_CurrentBuffersOffset >= m_InternalBuffers[0].size() / 4)
 		{
 			std::vector<std::vector<uint8_t>> NewBuffers = std::vector<std::vector<uint8_t>>(m_InternalBuffers.size(), std::vector<uint8_t>(m_StoredSamples * p_GetChannelFrameSize() * 2, 0));
 			for (size_t i = 0; i < NewBuffers.size(); i++)
 			{
-				std::memcpy(NewBuffers[i].data(), m_InternalBuffers[i].data(), m_StoredSamples * p_GetChannelFrameSize());
+				std::memcpy(NewBuffers[i].data(), m_InternalBuffers[i].data()+m_CurrentBuffersOffset, m_StoredSamples * p_GetChannelFrameSize());
 			}
+			m_InternalBuffers = std::move(NewBuffers);
+			m_CurrentBuffersOffset = 0;
 		}
 	}
 	size_t AudioFIFOBuffer::AvailableSamples() const
@@ -205,7 +207,7 @@ namespace MBMedia
 		{
 			throw std::runtime_error("AudioSourceIndex out of range!");
 		}
-		//TODO kan optimeras, själva interfacen med
+		//TODO kan optimeras, sjï¿½lva interfacen med
 		m_InputSources.erase(m_InputSources.begin() + IndexToRemove);
 		m_InputVolumes.erase(m_InputVolumes.begin() + IndexToRemove);
 		//m_AudioConverters.erase(m_AudioConverters.begin() + IndexToRemove);
@@ -214,7 +216,7 @@ namespace MBMedia
 	{
 		AudioBuffer ReturnValue = AudioBuffer(m_OutputParameters, NumberOfSamples);
 		size_t RecievedSamples = m_InputSources[SourceIndex]->GetNextSamples(ReturnValue.GetData(), NumberOfSamples, 0);
-		//TODO kanske redundnat, inte säker på om det ska krävas att man alltid har 0:at resten av inputen...
+		//TODO kanske redundnat, inte sï¿½ker pï¿½ om det ska krï¿½vas att man alltid har 0:at resten av inputen...
 		if (RecievedSamples < NumberOfSamples)
 		{
 			for (size_t i = 0; i < GetParametersDataPlanes(m_OutputParameters); i++)
@@ -247,7 +249,7 @@ namespace MBMedia
 		}
 		if (TotalInputData.size() == 0)
 		{
-			//int fått någon data, skriver bara 0
+			//int fï¿½tt nï¿½gon data, skriver bara 0
 			for (size_t i = 0; i < MBMedia::GetParametersDataPlanes(m_OutputParameters); i++)
 			{
 				std::memset(((uint8_t*)DataBuffer[i])+MBMedia::GetChannelFrameSize(m_OutputParameters)*BufferSampleOffset, 0, MBMedia::GetChannelFrameSize(m_OutputParameters) * NumberOfSamples);
@@ -578,7 +580,7 @@ namespace MBMedia
 	}
 	size_t AsyncrousAudioBuffer::GetNextSamples(uint8_t* const* DataBuffer, size_t NumberOfSamples,size_t OutputSampleoffset)
 	{
-		//returnar alltid alla samples även om dem inte finns sparade, kanske borde vänta vem vet?
+		//returnar alltid alla samples ï¿½ven om dem inte finns sparade, kanske borde vï¿½nta vem vet?
 		size_t ReturnValue = 0;
 		size_t ExtractedSamples = 0;
 		{

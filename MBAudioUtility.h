@@ -23,13 +23,13 @@ namespace MBMedia
 	uint8_t** AllocateAudioBuffer(AudioParameters const& BufferParameters, size_t NumberOfSamples);
 	void DeallocateAudioBuffer(AudioParameters const& BufferParameters, const uint8_t* const* BufferToDeallocatioe);
 
-	//utiltiy funktion för att verifiera att samplesen inte är fucked, fungerar egentligen bara för floats eftersom 
-	//PCM inte har något sätt att avgöra hur om den är invalid. Kanske skulle kunna inkludera att skillnaden mellan 2 individuella
-	//samples inte orsaker en "pop" så att säga
+	//utiltiy funktion fï¿½r att verifiera att samplesen inte ï¿½r fucked, fungerar egentligen bara fï¿½r floats eftersom 
+	//PCM inte har nï¿½got sï¿½tt att avgï¿½ra hur om den ï¿½r invalid. Kanske skulle kunna inkludera att skillnaden mellan 2 individuella
+	//samples inte orsaker en "pop" sï¿½ att sï¿½ga
 	bool VerifySamples(const uint8_t* const* AudioData, AudioParameters const& DataParameters, size_t NumberOfFrames, size_t SampelsOffset = 0);
 
 
-	//OBS Förutsätter att output datan är har utrymmer den behöver. Låg nivå konvertering. Kanske borde lägga till en Converssion context klass...
+	//OBS Fï¿½rutsï¿½tter att output datan ï¿½r har utrymmer den behï¿½ver. Lï¿½g nivï¿½ konvertering. Kanske borde lï¿½gga till en Converssion context klass...
 	void ConvertSampleData(const uint8_t** InputData, AudioParameters const& InputParameters, uint8_t** OutputBuffer, AudioParameters const& OutputParameters, size_t SamplesToConvert);
 
 	class AudioFIFOBuffer
@@ -80,13 +80,13 @@ namespace MBMedia
 		bool m_Finished = false;
 	public:
 		AudioDataConverter(AudioParameters const& InputParameters, AudioParameters const& OutputParameters);
-		//finns inte riktigt något sätt att verifiera att input datan är korrekt formatterad efter AudioParamters klassen, men är den ej det är det
+		//finns inte riktigt nï¿½got sï¿½tt att verifiera att input datan ï¿½r korrekt formatterad efter AudioParamters klassen, men ï¿½r den ej det ï¿½r det
 		//undefined behaviour
 		AudioDataConverter(AudioParameters const& OutputParameters);
 		void InitializeInputParameters(AudioParameters const& InputParameters) override;
 		AudioParameters GetAudioParameters() override;
 		void InsertData(const uint8_t* const* DataToInsert, size_t NumberOfSamples,size_t InputSampleOffset) override;
-		size_t AvailableSamples() override;//frames eller samples, vet inte riktigt än...
+		size_t AvailableSamples() override;//frames eller samples, vet inte riktigt ï¿½n...
 		size_t GetNextSamples(uint8_t* const* OutputBuffer, size_t NumberOfSamples,size_t OutputSampleOffset) override;
 		//void Flush() override;
 		~AudioDataConverter() override {}
@@ -127,7 +127,7 @@ namespace MBMedia
 		std::atomic<bool> m_Finishing{ true };
 
 		bool m_Initialised = false;
-		//Read only förutom vid initialisering
+		//Read only fï¿½rutom vid initialisering
 		AudioParameters m_AudioParameters;
 		//
 
