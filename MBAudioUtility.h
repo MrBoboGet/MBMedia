@@ -35,19 +35,13 @@ namespace MBMedia
 	class AudioFIFOBuffer
 	{
 	private:
-		std::vector<std::vector<uint8_t>> m_InternalBuffers = {};
-		static constexpr float m_GrowthFactor = 1.5;
-		SampleFormatInfo m_InputFormatInfo;
-		AudioParameters m_InputParameters;
-		size_t m_StoredSamples = 0;
-		size_t m_CurrentBuffersOffset = 0;
+		std::unique_ptr<void, void(*)(void*)> m_InternalData = std::unique_ptr<void*, void(*)(void*)>(nullptr, _DoNothing);
 
 		bool m_IsInitialized = false;
-		void p_ResizeBuffers();
-		size_t p_GetChannelFrameSize();
+		AudioParameters m_StoredAudioParameters;
+		//void p_ResizeBuffers();
+		//size_t p_GetChannelFrameSize();
 		void Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
-
-		mutable uint8_t** m_DataPointers = nullptr;
 	public:
 		AudioFIFOBuffer() {};
 		AudioFIFOBuffer(AudioParameters const& InputParameters, size_t InitialNumberOfSamples);
@@ -59,8 +53,8 @@ namespace MBMedia
 		size_t ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead);
 		size_t ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead, size_t OutputSampleOffset);
 
-		uint8_t* const* GetBuffer();
-		uint8_t const* const* GetBuffer() const;
+		//uint8_t* const* GetBuffer();
+		//uint8_t const* const* GetBuffer() const;
 
 		void DiscardSamples(size_t SamplesToDiscard);
 

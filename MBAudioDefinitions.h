@@ -68,6 +68,12 @@ namespace MBMedia
 
 		}
 	};
+	class SeekableAudioStream : public AudioStream
+	{
+	private:
+		virtual uint64_t CurrentSampleOffset() = 0;
+		virtual void SeekToSampleOffset(uint64_t SampleOffset) = 0;
+	};
 	class AudioStreamFilter
 	{
 	public:

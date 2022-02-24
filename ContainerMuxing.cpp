@@ -26,7 +26,51 @@ namespace MBMedia
 	void _FreePacket(void*);
 	void _FreeCodecContext(void*);
 
+	//GLOBAL HELPERS
 	
+	VideoDecodeInfo h_GetVideoDecodeInfo(AVCodecContext const* CodecContext)
+	{
+		VideoDecodeInfo ReturnValue;
+		ReturnValue.VideoInfo.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
+		ReturnValue.VideoInfo.Width = CodecContext->width;
+		ReturnValue.VideoInfo.Height = CodecContext->height;
+		ReturnValue.AverageBitrate = CodecContext->bit_rate;
+		ReturnValue.StreamTimebase = { CodecContext->time_base.num,CodecContext->time_base.den };
+		return(ReturnValue);
+	}
+	AudioDecodeInfo h_GetAudioDecodeInfo(AVCodecContext const* CodecContext)
+	{
+		AudioDecodeInfo ReturnValue;
+		ReturnValue.AudioInfo.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
+		ReturnValue.AudioInfo.SampleRate = CodecContext->sample_rate;
+		ReturnValue.AudioInfo.NumberOfChannels = CodecContext->channels;
+		ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
+		//TODO undersï¿½k det hï¿½r nï¿½rmare, vad innebï¿½r det egentligen om layouten ï¿½r 0?
+		if (CodecContext->channel_layout == 0)
+		{
+			if (ReturnValue.AudioInfo.NumberOfChannels == 2)
+			{
+				ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_STEREO);
+			}
+			else if (ReturnValue.AudioInfo.NumberOfChannels == 1)
+			{
+				ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_MONO);
+			}
+			else
+			{
+				throw std::runtime_error("Layout is 0 but channel count isn't 1 or 2");
+			}
+		}
+
+
+		ReturnValue.FrameSize = CodecContext->frame_size;
+		ReturnValue.AverageBitrate = CodecContext->bit_rate;
+		ReturnValue.StreamTimebase = { CodecContext->time_base.num,CodecContext->time_base.den };
+		return(ReturnValue);
+	}
+
+
+
 	//BEGIN StreamInfo
 	StreamInfo::StreamInfo(std::shared_ptr<void> FFMPEGContainerData, size_t StreamIndex)
 	{
@@ -35,6 +79,41 @@ namespace MBMedia
 		AVStream* StreamData = ((AVFormatContext*)FFMPEGContainerData.get())->streams[StreamIndex];
 		m_StreamCodec = h_FFMPEGCodecTypeToMBCodec(StreamData->codecpar->codec_id);
 		m_Type = h_FFMPEGMediaTypeToMBMediaType(StreamData->codecpar->codec_type);
+		StreamTimebase = { StreamData->time_base.num,StreamData->time_base.den };
+		StreamDuration = StreamData->duration;
+
+		//
+		AVCodecParameters* NewInputCodecParamters = StreamData->codecpar;
+		//TODO ineffektivt att behÃ¶va Ã¶ppna codecen fÃ¶r att avgÃ¶ra vad decode parametrarna Ã¤r, men enda sÃ¤ttet jag vet tillsvidare att garantera att parametrarna som fÃ¥s Ã¤r rÃ¤tt
+		const AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
+		AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
+		FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
+		FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
+		if (m_Type == MBMedia::MediaType::Video)
+		{
+			m_VideoDecodeInfo = h_GetVideoDecodeInfo(NewCodexContext);
+		}
+		else if (m_Type == MBMedia::MediaType::Audio)
+		{
+			m_AudioDecodeInfo = h_GetAudioDecodeInfo(NewCodexContext);
+		}
+		avcodec_free_context(&NewCodexContext);
+	}
+	AudioDecodeInfo StreamInfo::GetAudioInfo() const
+	{
+		if (m_Type != MBMedia::MediaType::Audio)
+		{
+			throw std::runtime_error("Stream not of audio type");
+		}
+		return(m_AudioDecodeInfo);
+	}
+	VideoDecodeInfo StreamInfo::GetVideoInfo() const
+	{
+		if (m_Type != MBMedia::MediaType::Video)
+		{
+			throw std::runtime_error("Stream not of video type");
+		}
+		return(m_VideoDecodeInfo);
 	}
 
 	//END StreamInfo
@@ -169,7 +248,7 @@ namespace MBMedia
 		uint8_t** ReturnValue = new uint8_t * [NumberOfDataPlanes];
 		for (size_t i = 0; i < NumberOfDataPlanes; i++)
 		{
-			//kanske inte borde men aja, enklast såhär
+			//kanske inte borde men aja, enklast sï¿½hï¿½r
 			ReturnValue[i] = new uint8_t[SamplesSize];
 			std::memset(ReturnValue[i], 0, SamplesSize);
 		}
@@ -254,18 +333,18 @@ namespace MBMedia
 	{
 		AVFormatContext* InputFormatContext;
 		InputFormatContext = avformat_alloc_context();
-		//DEBUG FÖR png
+		//DEBUG Fï¿½R png
 		InputFormatContext->max_analyze_duration = 100000000;
 		InputFormatContext->probesize = 100000000;
 		//
 
 		FFMPEGCall(avformat_open_input(&InputFormatContext, InputFile.c_str(), NULL, NULL));
-		//läsar in data om själva datastreamsen
+		//lï¿½sar in data om sjï¿½lva datastreamsen
 		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
 		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
 		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
 		{
-			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte är en del av en public header
+			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte ï¿½r en del av en public header
 		}
 	}
 	int h_ReadSearchableInputData(void* UserData, uint8_t* OutputBuffer, int buf_size)
@@ -327,10 +406,10 @@ namespace MBMedia
 		m_CostumIO = std::move(InputStream);
 		InputFormatContext->flags |= AVFMT_FLAG_CUSTOM_IO;
 		InputFormatContext->pb = avio_alloc_context((unsigned char*)av_malloc(8192), 8192, 0, this, h_ReadSearchableInputData, NULL, h_SeekSearchableInputStream);
-		//allokerar format kontexten, information om filtyp och innehåll,läser bara headers och etc
+		//allokerar format kontexten, information om filtyp och innehï¿½ll,lï¿½ser bara headers och etc
 		//InputFormatContext->ifo
 
-		const size_t ProbeDataSize = 5000000;//lite yikes, rätt mycket data som läses?
+		const size_t ProbeDataSize = 5000000;//lite yikes, rï¿½tt mycket data som lï¿½ses?
 		//uint8_t* ProbeData[ProbeDataSize + AVPROBE_PADDING_SIZE];
 		//memset(ProbeData, 0, ProbeDataSize + AVPROBE_PADDING_SIZE);
 		m_ProbedData = std::string(ProbeDataSize, 0);
@@ -343,22 +422,22 @@ namespace MBMedia
 		ProbeStruct.mime_type = "";
 		InputFormatContext->iformat = av_probe_input_format(&ProbeStruct, 1);
 
-		//DEBUG FÖR png
+		//DEBUG Fï¿½R png
 		InputFormatContext->max_analyze_duration = 100000000;
 		InputFormatContext->probesize = 100000000;
 		//
 
 
 		//InputFormatContext->iformat =(AVInputFormat*)123123123;
-		m_ProbedData = "";//OBS efersom vi antar att streamen är searchable, kanske inte alltid är det?
+		m_ProbedData = "";//OBS efersom vi antar att streamen ï¿½r searchable, kanske inte alltid ï¿½r det?
 		m_CostumIO->SetInputPosition(0);
 		FFMPEGCall(avformat_open_input(&InputFormatContext, "", NULL, NULL));
-		//läsar in data om själva datastreamsen
+		//lï¿½sar in data om sjï¿½lva datastreamsen
 		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
 		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
 		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
 		{
-			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte är en del av en public header
+			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte ï¿½r en del av en public header
 		}
 	}
 	ContainerDemuxer::~ContainerDemuxer()
@@ -372,6 +451,11 @@ namespace MBMedia
 	StreamInfo const& ContainerDemuxer::GetStreamInfo(size_t StreamIndex)
 	{
 		return(m_InputStreams[StreamIndex]);
+	}
+	void ContainerDemuxer::SeekPosition(size_t StreamIndexToSearch, int64_t StreamTimestampPosition)
+	{
+		AVFormatContext* InputContext = (AVFormatContext*)m_InternalData.get();
+		int Result = FFMPEGCall(av_seek_frame(InputContext, StreamIndexToSearch, StreamTimestampPosition, AVSEEK_FLAG_BACKWARD));
 	}
 	StreamPacket ContainerDemuxer::GetNextPacket(size_t* StreamIndex)
 	{
@@ -423,7 +507,7 @@ namespace MBMedia
 		AVFormatContext* OutputFormat = (AVFormatContext*)m_InternalData.get();
 		PacketToWrite.Rescale({ OutputFormat->streams[StreamIndex]->time_base.num, OutputFormat->streams[StreamIndex]->time_base.den });
 		AVPacket* FFMpegPacket = (AVPacket*)PacketToWrite.m_InternalData.get();
-		//vet inte om det står någonstans, men man måste specifiera vilket index packetet är när man ska skriva till streamen...
+		//vet inte om det stï¿½r nï¿½gonstans, men man mï¿½ste specifiera vilket index packetet ï¿½r nï¿½r man ska skriva till streamen...
 		FFMpegPacket->stream_index = StreamIndex;
 		if (StreamIndex == 1)
 		{
@@ -485,7 +569,7 @@ namespace MBMedia
 		AVFrame* Frame2 = (AVFrame*)FFMPEGFrameToFree;
 		if (Frame->buf[0] == NULL)
 		{
-			//TODO herre gud vad ass, hacky sätt att få en frame att kunna freea även om jag allokera den med avpicture_fill, men då ska man bara ta bort försat pointer...
+			//TODO herre gud vad ass, hacky sï¿½tt att fï¿½ en frame att kunna freea ï¿½ven om jag allokera den med avpicture_fill, men dï¿½ ska man bara ta bort fï¿½rsat pointer...
 			av_freep(&Frame->data[0]);
 			//size_t Offset = 0;
 			//while (Frame->data[Offset] != nullptr && Offset < AV_NUM_DATA_POINTERS)
@@ -584,44 +668,14 @@ namespace MBMedia
 	{
 		AudioDecodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
-		ReturnValue.AudioInfo.AudioFormat = h_FFMPEGAudioFormatToMBFormat(CodecContext->sample_fmt);
-		ReturnValue.AudioInfo.SampleRate = CodecContext->sample_rate;
-		ReturnValue.AudioInfo.NumberOfChannels = CodecContext->channels;
-		ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(CodecContext->channel_layout);
-		//TODO undersök det här närmare, vad innebär det egentligen om layouten är 0?
-		if (CodecContext->channel_layout == 0)
-		{
-			if (ReturnValue.AudioInfo.NumberOfChannels == 2)
-			{
-				ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_STEREO);
-			}
-			else if(ReturnValue.AudioInfo.NumberOfChannels == 1)
-			{
-				ReturnValue.AudioInfo.Layout = h_FFMPEGLayoutToMBLayout(AV_CH_LAYOUT_MONO);
-			}
-			else
-			{
-				throw std::runtime_error("Layout is 0 but channel count isn't 1 or 2");
-			}
-		}
-
-
-		ReturnValue.FrameSize = CodecContext->frame_size;
-		ReturnValue.AverageBitrate = CodecContext->bit_rate;
-		ReturnValue.StreamTimebase = GetStreamTimebase();
-
-		ReturnValue.StreamTimebase = this->GetStreamTimebase();//ganska trassligt, kommer inte ihåg varför jag har 2 stycken...
+		ReturnValue = h_GetAudioDecodeInfo(CodecContext);
 		return(ReturnValue);
 	}
 	VideoDecodeInfo StreamDecoder::GetVideoDecodeInfo() const
 	{
 		VideoDecodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
-		ReturnValue.VideoInfo.Format = h_FFMPEGVideoFormatToMBVideoFormat(CodecContext->pix_fmt);
-		ReturnValue.VideoInfo.Width = CodecContext->width;
-		ReturnValue.VideoInfo.Height = CodecContext->height;
-		ReturnValue.AverageBitrate = CodecContext->bit_rate;
-		ReturnValue.StreamTimebase = GetStreamTimebase();
+		ReturnValue = h_GetVideoDecodeInfo(CodecContext);
 		return(ReturnValue);
 	}
 	StreamDecoder::StreamDecoder(StreamInfo const& StreamToDecode)
@@ -631,7 +685,7 @@ namespace MBMedia
 		const AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
 		AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
 		FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
-		//sedan måste vi öppna den, vet inte riktigt varför, initializerar den kanske?
+		//sedan mï¿½ste vi ï¿½ppna den, vet inte riktigt varfï¿½r, initializerar den kanske?
 		FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
 		m_InternalData = std::shared_ptr<void>(NewCodexContext, _FreeCodecContext);
 		m_Type = h_FFMPEGMediaTypeToMBMediaType(NewInputCodec->type);
@@ -691,7 +745,7 @@ namespace MBMedia
 			m_FrameConverter.InsertFrame(ReturnValue);
 			ReturnValue = m_FrameConverter.GetNextFrame();
 		}
-		//^ kan inte hända samtidigt
+		//^ kan inte hï¿½nda samtidigt
 		if (m_DecodeStreamFinished == true && m_FrameConverter.IsInitialised())
 		{
 			ReturnValue = m_FrameConverter.GetNextFrame();
@@ -712,7 +766,15 @@ namespace MBMedia
 			m_FrameConverter.Flush();
 		}
 	}
-
+	void StreamDecoder::Reset()
+	{
+		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
+		avcodec_flush_buffers(CodecContext);
+		if (m_FrameConverter.IsInitialised())
+		{
+			m_FrameConverter.Reset();
+		}
+	}
 	//END StreamDecoder
 	void _FreeAudioFifo(void* BufferToFree)
 	{
@@ -896,7 +958,10 @@ namespace MBMedia
 		p_ConvertNewFrame();
 		p_FlushBufferedFrames();
 	}
-
+	void AudioFrameConverter::Reset()
+	{
+		*this = AudioFrameConverter(m_InputTimebase, m_OldAudioParameters, m_NewAudioParameters, m_NewFrameSize);
+	}
 	//END AudioConverter
 
 
@@ -915,13 +980,13 @@ namespace MBMedia
 	}
 	void AudioToFrameConverter::InsertAudioData(const uint8_t* const* AudioData, size_t NumberOfSamples)
 	{
-		//Borde inte hända men men
+		//Borde inte hï¿½nda men men
 		if (m_AudioFifoBuffer == nullptr || m_Flushed)
 		{
 			throw std::exception();
 		}
 		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioFifoBuffer.get();
-		//lite bruh att det inte är const pointer?
+		//lite bruh att det inte ï¿½r const pointer?
 		av_audio_fifo_write(AudioBuffer, (void**)AudioData, NumberOfSamples);
 		while (av_audio_fifo_size(AudioBuffer) > NumberOfSamples)
 		{
@@ -930,7 +995,7 @@ namespace MBMedia
 	}
 	void AudioToFrameConverter::p_ConvertStoredSamples()
 	{
-		//Borde inte hända men men
+		//Borde inte hï¿½nda men men
 		if (m_AudioFifoBuffer == nullptr)
 		{
 			throw std::exception();
@@ -953,7 +1018,7 @@ namespace MBMedia
 			throw std::exception();
 		}
 		AVAudioFifo* AudioBuffer = (AVAudioFifo*)m_AudioFifoBuffer.get();
-		//gör inget mer än att man kan extrahera sista framen även om den inte är stor nog
+		//gï¿½r inget mer ï¿½n att man kan extrahera sista framen ï¿½ven om den inte ï¿½r stor nog
 		while (av_audio_fifo_size(AudioBuffer) > 0)
 		{
 			p_ConvertStoredSamples();
@@ -1026,9 +1091,9 @@ namespace MBMedia
 		NewFrame->height = Height;
 		NewFrame->format = h_MBVideoFormatToFFMPEGVideoFormat(FormatToUse);
 
-		//Nu skulle man kunan ställa sig frågan, varför är aline på 32? Svaret är: VET EJ.
-		//Att align behöver vara samma för båda är ju logiskt, men att det måste vara så och inte funkar med 0 förstår jag inte
-		//jag vet att det andra delar av ffmpeg kräver 32 bitars alignment, så jag chansade och körde på det
+		//Nu skulle man kunan stï¿½lla sig frï¿½gan, varfï¿½r ï¿½r aline pï¿½ 32? Svaret ï¿½r: VET EJ.
+		//Att align behï¿½ver vara samma fï¿½r bï¿½da ï¿½r ju logiskt, men att det mï¿½ste vara sï¿½ och inte funkar med 0 fï¿½rstï¿½r jag inte
+		//jag vet att det andra delar av ffmpeg krï¿½ver 32 bitars alignment, sï¿½ jag chansade och kï¿½rde pï¿½ det
 		int numBytes = av_image_get_buffer_size(AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height,32);
 		uint8_t* dataBuffer = (uint8_t*)av_malloc(numBytes * sizeof(uint8_t));
 		av_image_fill_arrays(NewFrame->data, NewFrame->linesize,dataBuffer, AVPixelFormat(NewFrame->format), NewFrame->width, NewFrame->height,32);
@@ -1039,13 +1104,13 @@ namespace MBMedia
 		AVFrame* InputFrame = (AVFrame*)FrameToInsert.m_InternalData.get();
 		SwsContext* ConversionContext = (SwsContext*)m_ConversionContext.get();
 
-		//Kod snodd från https://lists.ffmpeg.org/pipermail/libav-user/2015-September/008473.html
+		//Kod snodd frï¿½n https://lists.ffmpeg.org/pipermail/libav-user/2015-September/008473.html
 		AVFrame* NewFrame = h_GetFFMPEGFrame(m_NewVideoParameters.Width, m_NewVideoParameters.Height, m_NewVideoParameters.Format);
 		//NewFrame->data
 		int Result = FFMPEGCall(sws_scale(ConversionContext, (const uint8_t* const*)InputFrame->data, InputFrame->linesize, 0, InputFrame->height, NewFrame->data, NewFrame->linesize));
 		if (Result < 0)
 		{
-			throw std::exception(); //leakar, mest gjord för debugging
+			throw std::exception(); //leakar, mest gjord fï¿½r debugging
 		}
 		NewFrame->pts = InputFrame->pts;
 		NewFrame->pkt_dts = InputFrame->pkt_dts;
@@ -1066,6 +1131,10 @@ namespace MBMedia
 	void VideoConverter::Flush()
 	{
 		//Do nothing, conversion can be done completely frame by frame basis
+	}
+	void VideoConverter::Reset()
+	{
+		//
 	}
 	//END VideoConverter
 	StreamFrame FlipRGBPictureHorizontally(StreamFrame const& ImageToFlip)
@@ -1115,6 +1184,17 @@ namespace MBMedia
 	void FrameConverter::Flush()
 	{
 		m_Flushed = true;
+		if (m_Type == MediaType::Audio)
+		{
+			m_AudioConverter->Flush();
+		}
+		else
+		{
+			m_VideoConverter->Flush();
+		}
+	}
+	void FrameConverter::Reset()
+	{
 		if (m_Type == MediaType::Audio)
 		{
 			m_AudioConverter->Flush();

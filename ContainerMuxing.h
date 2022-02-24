@@ -88,7 +88,7 @@ namespace MBMedia
 		StreamFrame(void* FFMPEGData, TimeBase FrameTimeBase, MediaType FrameType);
 		StreamFrame();
 		int64_t GetPresentationTime() const;
-		int64_t GetDuration() const;// <0 om inte känd
+		int64_t GetDuration() const;// <0 om inte kï¿½nd
 		TimeBase GetTimeBase()const { return(m_TimeBase); };
 		MediaType GetMediaType() const { return(m_MediaType); };
 
@@ -104,12 +104,19 @@ namespace MBMedia
 	private:
 		friend class ContainerDemuxer;
 		friend class StreamDecoder;
-		size_t m_StreamIndex = -1;//all detta förutsätter att stream datan  inte förändras
+		size_t m_StreamIndex = -1;//all detta fï¿½rutsï¿½tter att stream datan  inte fï¿½rï¿½ndras
 		std::shared_ptr<void> m_InternalData = nullptr;
-		StreamInfo(std::shared_ptr<void> FFMPEGContainerData, size_t StreamIndex); //används av decoder, en decode context har en konstant mängd streams
+		StreamInfo(std::shared_ptr<void> FFMPEGContainerData, size_t StreamIndex); //anvï¿½nds av decoder, en decode context har en konstant mï¿½ngd streams
 		MediaType m_Type = MediaType::Null;
 		Codec m_StreamCodec = Codec::Null;
+
+		AudioDecodeInfo m_AudioDecodeInfo;
+		VideoDecodeInfo m_VideoDecodeInfo;
 	public:
+		TimeBase StreamTimebase;
+		int64_t StreamDuration = -1;
+		AudioDecodeInfo GetAudioInfo() const;
+		VideoDecodeInfo GetVideoInfo() const;
 		MediaType GetMediaType() const { return(m_Type); };
 		Codec GetCodec() const { return(m_StreamCodec); };
 	};
@@ -132,7 +139,7 @@ namespace MBMedia
 	};
 
 
-	//Semantiken bakom båda dem här struktsen blev aningen fucky och lite wucky, men den under konverterar per frame, och den över per audio data
+	//Semantiken bakom bï¿½da dem hï¿½r struktsen blev aningen fucky och lite wucky, men den under konverterar per frame, och den ï¿½ver per audio data
 	class AudioFrameConverter
 	{
 	private:
@@ -145,7 +152,7 @@ namespace MBMedia
 		TimeBase m_InputTimebase;
 		size_t m_NewFrameSize = -1;
 		//DEBUG
-		//ANTAGANDE varje input timestamp har monotont växande pts
+		//ANTAGANDE varje input timestamp har monotont vï¿½xande pts
 		int64_t DEBUG_LastTimestamp = 0;
 		//DEBUG
 		int64_t m_CurrentTimestamp = 0;
@@ -158,6 +165,7 @@ namespace MBMedia
 		void InsertFrame(StreamFrame const& FrameToInsert);
 		StreamFrame GetNextFrame();
 		void Flush();
+		void Reset();
 	};
 	class VideoConverter
 	{
@@ -173,6 +181,7 @@ namespace MBMedia
 		void InsertFrame(StreamFrame const& FrameToInsert);
 		StreamFrame GetNextFrame();
 		void Flush();
+		void Reset();
 	};
 	//StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip);
 	StreamFrame FlipRGBPictureHorizontally(StreamFrame const& ImageToFlip);
@@ -199,6 +208,7 @@ namespace MBMedia
 		FrameConverter(TimeBase InputTimebase, AudioParameters const& OldParameters, AudioParameters const& NewParameters, size_t NewFrameSize);
 		FrameConverter(TimeBase InputTimebase, VideoParameters const& OldParameters, VideoParameters const& NewParameters);
 		void Flush();
+		void Reset();
 		void InsertFrame(StreamFrame const& FrameToInsert);
 		StreamFrame GetNextFrame();
 
@@ -226,22 +236,24 @@ namespace MBMedia
 	public:
 		void SetAudioConversionParameters(AudioParameters const& ParametersToConvertTo, size_t NewFrameSize);
 		void SetVideoConversionParameters(VideoParameters const& ParametersToConvertTo);
+
 		AudioDecodeInfo GetAudioDecodeInfo() const;
 		VideoDecodeInfo GetVideoDecodeInfo() const;
 
 		TimeBase GetCodecTimebase() const { return(m_CodecTimebase); };
 		TimeBase GetStreamTimebase() const { return(m_CodecTimebase); };
+
 		StreamDecoder(StreamDecoder const&) = delete;
 		StreamDecoder(StreamDecoder&&) = default;
 		StreamDecoder& operator=(StreamDecoder&&) = default;
 
 		MediaType GetType() const { return(m_Type); };
-
-		StreamDecoder(StreamInfo const& StreamToDecode);//implicit antagande här, att decoda en stream kan göras "korrekt", att omvandla eller omtolka datan bör göras från framesen vi får efter
+		StreamDecoder(StreamInfo const& StreamToDecode);//implicit antagande hï¿½r, att decoda en stream kan gï¿½ras "korrekt", att omvandla eller omtolka datan bï¿½r gï¿½ras frï¿½n framesen vi fï¿½r efter
 
 		void InsertPacket(StreamPacket const& PacketToDecode);
 		StreamFrame GetNextFrame();
 		void Flush();
+		void Reset();
 		//~StreamDecoder();
 	};
 
@@ -294,6 +306,9 @@ namespace MBMedia
 		StreamPacket GetNextPacket(size_t* StreamIndex);
 		//bool Finished() const;
 
+		//OBS kan vara tidiagre Ã¤n specifcerat
+		void SeekPosition(size_t StreamIndexToSearch, int64_t StreamTimestampPosition);
+
 		ContainerDemuxer(std::string const& InputFile);
 		ContainerDemuxer(std::unique_ptr<MBUtility::MBSearchableInputStream>&& InputStream);
 		~ContainerDemuxer();
@@ -320,7 +335,7 @@ namespace MBMedia
 		StreamEncoder const& GetOutputEncoder(size_t EncoderIndex);
 
 
-		//ffmpeg verkar inte ha någon stream data i framen, kanske innebär att framen på något sätt är atomisk...
+		//ffmpeg verkar inte ha nï¿½gon stream data i framen, kanske innebï¿½r att framen pï¿½ nï¿½got sï¿½tt ï¿½r atomisk...
 		void InsertFrame(StreamFrame const& PacketToInsert, size_t StreamIndex);
 		void Finalize();
 	};

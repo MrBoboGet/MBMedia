@@ -12,65 +12,69 @@
 #include "MBMediaInternals.h"
 namespace MBMedia
 {
-
+	void _FreeFIFOBuffer(void* FifoBufferToFree)
+	{
+		AVAudioFifo* FFMPEGBuffer = (AVAudioFifo*)FifoBufferToFree;
+		av_audio_fifo_free(FFMPEGBuffer);
+	}
 	//BEGIN AudioFIFOBuffer
 	void AudioFIFOBuffer::Initialize(AudioParameters const& InputParameters, size_t InitialNumberOfSamples)
 	{
 		m_IsInitialized = true;
-		m_InputFormatInfo = MBMedia::GetSampleFormatInfo(InputParameters.AudioFormat);
-		m_InputParameters = InputParameters;
-		m_InternalBuffers = std::vector<std::vector<uint8_t>>(GetParametersDataPlanes(InputParameters), std::vector<uint8_t>(InitialNumberOfSamples * m_InputFormatInfo.SampleSize, 0));
+		m_StoredAudioParameters = InputParameters;
+		AVAudioFifo* FFMPEGBuffer = av_audio_fifo_alloc(h_MBSampleFormatToFFMPEGSampleFormat(InputParameters.AudioFormat), InputParameters.NumberOfChannels, std::max(InitialNumberOfSamples,size_t(4096)));
+		m_InternalData = std::unique_ptr<void, void(*)(void*)>(FFMPEGBuffer, _FreeFIFOBuffer);
 	}
 	AudioFIFOBuffer::AudioFIFOBuffer(AudioParameters const& InputParameters, size_t InitialNumberOfSamples)
 	{
 		Initialize(InputParameters, InitialNumberOfSamples);
 	}
-	size_t AudioFIFOBuffer::p_GetChannelFrameSize()
-	{
-		if (m_InputFormatInfo.Interleaved)
-		{
-			return(m_InputFormatInfo.SampleSize * m_InputParameters.NumberOfChannels);
-		}
-		else
-		{
-			return(m_InputFormatInfo.SampleSize);
-		}
-	}
-	uint8_t* const* AudioFIFOBuffer::GetBuffer()
-	{
-		if (m_IsInitialized == false)
-		{
-			throw std::exception();
-		}
-		size_t DataPlanesCount = GetParametersDataPlanes(m_InputParameters);
-		if (m_DataPointers == nullptr)
-		{
-			//std::unique_ptr<uint8
-			m_DataPointers = new uint8_t * [DataPlanesCount];
-		}
-		for (size_t i = 0; i < DataPlanesCount; i++)
-		{
-			m_DataPointers[i] = m_InternalBuffers[i].data() + m_CurrentBuffersOffset;
-		}
-		return(m_DataPointers);
-	}
-	const uint8_t* const* AudioFIFOBuffer::GetBuffer() const
-	{
-		if (m_IsInitialized == false)
-		{
-			throw std::exception();
-		}
-		size_t DataPlanesCount = GetParametersDataPlanes(m_InputParameters);
-		if (m_DataPointers == nullptr)
-		{
-			m_DataPointers = new uint8_t * [DataPlanesCount];
-		}
-		for (size_t i = 0; i < DataPlanesCount; i++)
-		{
-			m_DataPointers[i] = (uint8_t*)m_InternalBuffers[i].data() + m_CurrentBuffersOffset;
-		}
-		return(m_DataPointers);
-	}
+	//size_t AudioFIFOBuffer::p_GetChannelFrameSize()
+	//{
+	//	if (m_InputFormatInfo.Interleaved)
+	//	{
+	//		return(m_InputFormatInfo.SampleSize * m_InputParameters.NumberOfChannels);
+	//	}
+	//	else
+	//	{
+	//		return(m_InputFormatInfo.SampleSize);
+	//	}
+	//}
+	//uint8_t* const* AudioFIFOBuffer::GetBuffer()
+	//{
+	//	if (m_IsInitialized == false)
+	//	{
+	//		throw std::exception();
+	//	}
+	//	size_t DataPlanesCount = GetParametersDataPlanes(m_InputParameters);
+	//	if (m_DataPointers == nullptr)
+	//	{
+	//		//std::unique_ptr<uint8
+	//		m_DataPointers = new uint8_t * [DataPlanesCount];
+	//	}
+	//	for (size_t i = 0; i < DataPlanesCount; i++)
+	//	{
+	//		m_DataPointers[i] = m_InternalBuffers[i].data() + m_CurrentBuffersOffset;
+	//	}
+	//	return(m_DataPointers);
+	//}
+	//const uint8_t* const* AudioFIFOBuffer::GetBuffer() const
+	//{
+	//	if (m_IsInitialized == false)
+	//	{
+	//		throw std::exception();
+	//	}
+	//	size_t DataPlanesCount = GetParametersDataPlanes(m_InputParameters);
+	//	if (m_DataPointers == nullptr)
+	//	{
+	//		m_DataPointers = new uint8_t * [DataPlanesCount];
+	//	}
+	//	for (size_t i = 0; i < DataPlanesCount; i++)
+	//	{
+	//		m_DataPointers[i] = (uint8_t*)m_InternalBuffers[i].data() + m_CurrentBuffersOffset;
+	//	}
+	//	return(m_DataPointers);
+	//}
 	void AudioFIFOBuffer::InsertData(const uint8_t* const* AudioData, size_t NumberOfSamples)
 	{
 		InsertData(AudioData, NumberOfSamples, 0);
@@ -79,22 +83,19 @@ namespace MBMedia
 	{
 		if (!m_IsInitialized)
 		{
-			throw std::exception();
+			throw std::runtime_error("FIFO Buffer not initialised");
 		}
 #ifdef MBMEDIA_VERIFY_AUDIO_DATA
-		assert(VerifySamples(AudioData, m_InputParameters, NumberOfSamples, InputSampleOffset));
+		assert(VerifySamples(AudioData, m_StoredAudioParameters, NumberOfSamples, InputSampleOffset));
 #endif
-		size_t NewSamplesSize = NumberOfSamples * p_GetChannelFrameSize();
-		size_t StoredSamplesByteOffset = (m_StoredSamples * p_GetChannelFrameSize()) + m_CurrentBuffersOffset;
-		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
+		AVAudioFifo* InternalFifo = (AVAudioFifo*)m_InternalData.get();
+		uint8_t** InputArray = new uint8_t * [GetParametersDataPlanes(m_StoredAudioParameters)];
+		for (size_t i = 0; i < GetParametersDataPlanes(m_StoredAudioParameters); i++)
 		{
-			if (m_InternalBuffers[i].size() - StoredSamplesByteOffset < NewSamplesSize)
-			{
-				m_InternalBuffers[i].resize(m_InternalBuffers[i].size() * double(m_GrowthFactor) + NewSamplesSize, 0);
-			}
-			std::memcpy(m_InternalBuffers[i].data() + StoredSamplesByteOffset, AudioData[i] + (InputSampleOffset * p_GetChannelFrameSize()), NewSamplesSize);
+			InputArray[i] = ((uint8_t*)AudioData[i]) + GetChannelFrameSize(m_StoredAudioParameters) * InputSampleOffset;
 		}
-		m_StoredSamples += NumberOfSamples;
+		int Result = av_audio_fifo_write(InternalFifo, (void**)InputArray, NumberOfSamples);
+		delete[] InputArray;
 	}
 	size_t AudioFIFOBuffer::ReadData(uint8_t* const* OutputBuffers, size_t NumberOfSamplesToRead)
 	{
@@ -104,61 +105,54 @@ namespace MBMedia
 	{
 		if (!m_IsInitialized)
 		{
-			throw std::exception();
+			throw std::runtime_error("FIFO Buffer not initialised");
 		}
-		size_t SamplesToExtract = std::min(m_StoredSamples, NumberOfSamplesToRead);
-		for (size_t i = 0; i < m_InternalBuffers.size(); i++)
+		AVAudioFifo* InternalFifo = (AVAudioFifo*)m_InternalData.get();
+		size_t SamplesToExtract = std::min(NumberOfSamplesToRead,size_t(av_audio_fifo_size(InternalFifo)));
+		uint8_t** InputArray = new uint8_t * [GetParametersDataPlanes(m_StoredAudioParameters)];
+		for (size_t i = 0; i < GetParametersDataPlanes(m_StoredAudioParameters); i++)
 		{
-			std::memcpy(OutputBuffers[i] + OutputSampleOffset * p_GetChannelFrameSize(), m_InternalBuffers[i].data() + m_CurrentBuffersOffset, SamplesToExtract * p_GetChannelFrameSize());
+			InputArray[i] = ((uint8_t*)OutputBuffers[i]) + GetChannelFrameSize(m_StoredAudioParameters) * OutputSampleOffset;
 		}
-		m_StoredSamples -= SamplesToExtract;
-		m_CurrentBuffersOffset += SamplesToExtract * p_GetChannelFrameSize();
-		p_ResizeBuffers();
+		int Result = av_audio_fifo_read(InternalFifo,(void**) InputArray, SamplesToExtract);
+		delete[] InputArray;
 #ifdef MBMEDIA_VERIFY_AUDIO_DATA
-		assert(VerifySamples(OutputBuffers, m_InputParameters, SamplesToExtract, OutputSampleOffset));
+		assert(VerifySamples(OutputBuffers, m_StoredAudioParameters, SamplesToExtract, OutputSampleOffset));
 #endif
 		return(SamplesToExtract);
 	}
 	void AudioFIFOBuffer::DiscardSamples(size_t SamplesToDiscard)
 	{
-		assert(GetParametersDataPlanes(m_InputParameters) == m_InternalBuffers.size());
-		if (SamplesToDiscard >= m_StoredSamples)
+		if (!m_IsInitialized)
 		{
-			for (size_t i = 0; i < GetParametersDataPlanes(m_InputParameters); i++)
-			{
-				m_InternalBuffers[i].resize(0);
-			}
-			m_StoredSamples = 0;
-			m_CurrentBuffersOffset = 0;
+			throw std::runtime_error("FIFO Buffer not initialised");
 		}
-		else
-		{
-			m_StoredSamples -= SamplesToDiscard;
-			m_CurrentBuffersOffset += p_GetChannelFrameSize() * SamplesToDiscard;
-			p_ResizeBuffers();
-		}
+		AVAudioFifo* InternalFifo = (AVAudioFifo*)m_InternalData.get();
+		int Result = av_audio_fifo_drain(InternalFifo, SamplesToDiscard);
 	}
-	void AudioFIFOBuffer::p_ResizeBuffers()
-	{
-		//TODO anv�nder godtycklig heuristic, kanske vill antingen stora dem som en linked lista eller faktiskt unders�ka hur man ska g�ra?
-		if (m_CurrentBuffersOffset >= m_InternalBuffers[0].size() / 4)
-		{
-			std::vector<std::vector<uint8_t>> NewBuffers = std::vector<std::vector<uint8_t>>(m_InternalBuffers.size(), std::vector<uint8_t>(m_StoredSamples * p_GetChannelFrameSize() * 2, 0));
-			for (size_t i = 0; i < NewBuffers.size(); i++)
-			{
-				std::memcpy(NewBuffers[i].data(), m_InternalBuffers[i].data()+m_CurrentBuffersOffset, m_StoredSamples * p_GetChannelFrameSize());
-			}
-			m_InternalBuffers = std::move(NewBuffers);
-			m_CurrentBuffersOffset = 0;
-		}
-	}
+	//void AudioFIFOBuffer::p_ResizeBuffers()
+	//{
+	//	//TODO anv�nder godtycklig heuristic, kanske vill antingen stora dem som en linked lista eller faktiskt unders�ka hur man ska g�ra?
+	//	if (m_CurrentBuffersOffset >= m_InternalBuffers[0].size() / 4)
+	//	{
+	//		std::vector<std::vector<uint8_t>> NewBuffers = std::vector<std::vector<uint8_t>>(m_InternalBuffers.size(), std::vector<uint8_t>(m_StoredSamples * p_GetChannelFrameSize() * 2, 0));
+	//		for (size_t i = 0; i < NewBuffers.size(); i++)
+	//		{
+	//			std::memcpy(NewBuffers[i].data(), m_InternalBuffers[i].data()+m_CurrentBuffersOffset, m_StoredSamples * p_GetChannelFrameSize());
+	//		}
+	//		m_InternalBuffers = std::move(NewBuffers);
+	//		m_CurrentBuffersOffset = 0;
+	//	}
+	//}
 	size_t AudioFIFOBuffer::AvailableSamples() const
 	{
 		if (!m_IsInitialized)
 		{
-			throw std::exception();
+			throw std::runtime_error("FIFO Buffer not initialised");
 		}
-		return(m_StoredSamples);
+		AVAudioFifo* InternalFifo = (AVAudioFifo*)m_InternalData.get();
+		size_t ReturnValue = av_audio_fifo_size(InternalFifo);
+		return(ReturnValue);
 	}
 	//END AudioFIFOBuffer
 
@@ -451,7 +445,9 @@ namespace MBMedia
 		}
 		if (m_AudioBuffer.AvailableSamples() > 0)
 		{
-			Result = swr_convert(ConversionContext, OutputPointers.data(), NumberOfSamples, (const uint8_t**)m_AudioBuffer.GetBuffer(), m_AudioBuffer.AvailableSamples());
+			MBMedia::AudioBuffer TempBuffer = MBMedia::AudioBuffer(m_InputParameters, m_AudioBuffer.AvailableSamples());
+			m_AudioBuffer.ReadData(TempBuffer.GetData(), m_AudioBuffer.AvailableSamples());
+			Result = swr_convert(ConversionContext, OutputPointers.data(), NumberOfSamples, (const uint8_t**)TempBuffer.GetData(), TempBuffer.GetSamplesCount());
 		}
 		else
 		{
@@ -461,7 +457,7 @@ namespace MBMedia
 				m_Finished = true;
 			}
 		}
-		m_AudioBuffer.DiscardSamples(m_AudioBuffer.AvailableSamples());
+		//m_AudioBuffer.DiscardSamples(m_AudioBuffer.AvailableSamples());
 		FFMPEGCall(Result);
 		if (Result < 0)
 		{
