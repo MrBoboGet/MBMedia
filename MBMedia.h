@@ -20,8 +20,13 @@ namespace MBMedia
 {
 	void Transcode(std::string const& InputFile, std::string const& OutputFile,Codec NewAudioCodec,Codec NewVideoCodec);
 
-
-
+	enum class LogLevel
+	{
+		None,
+		All,
+		Null
+	};
+	void SetLogLevel(LogLevel NewLevel);
 	class AudioOctetStreamer : public AudioStream
 	{
 	private:

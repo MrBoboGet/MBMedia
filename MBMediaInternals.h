@@ -21,7 +21,10 @@ namespace MBMedia
 	int FFMPEGCall(int ReadFrameResponse);
 	inline void _FreeFormatContext(void* DataToFree)
 	{
-		avformat_free_context((AVFormatContext*)DataToFree);
+		if (DataToFree != nullptr)
+		{
+			avformat_free_context((AVFormatContext*)DataToFree);
+		}
 		//FFMPEGCall();
 	}
 	inline void _FreeSwrContext(void* ContextToFree)

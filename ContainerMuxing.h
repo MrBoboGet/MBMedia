@@ -55,6 +55,7 @@ namespace MBMedia
 		std::unique_ptr<void, void (*)(void*)> m_InternalData = std::unique_ptr<void, void (*)(void*)>(nullptr, _DoNothing);
 		MediaType m_Type = MediaType::Null;
 		StreamPacket(void* FFMPEGPacket, TimeBase PacketTimebase, MediaType PacketType);
+		StreamPacket() {};
 		TimeBase m_TimeBase;
 	public:
 		//float GetDuration();
@@ -87,8 +88,13 @@ namespace MBMedia
 	public:
 		StreamFrame(void* FFMPEGData, TimeBase FrameTimeBase, MediaType FrameType);
 		StreamFrame();
+		
 		int64_t GetPresentationTime() const;
-		int64_t GetDuration() const;// <0 om inte k�nd
+		void SetPresentationTime(int64_t NewTimestamp);
+
+		int64_t GetDuration() const;// <0 om inte känd
+		void SetDuration(int64_t NewDuration);
+
 		TimeBase GetTimeBase()const { return(m_TimeBase); };
 		MediaType GetMediaType() const { return(m_MediaType); };
 
@@ -183,7 +189,7 @@ namespace MBMedia
 		void Flush();
 		void Reset();
 	};
-	//StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip);
+	////StreamFrame FlipPictureHorizontally(StreamFrame const& ImageToFlip);
 	StreamFrame FlipRGBPictureHorizontally(StreamFrame const& ImageToFlip);
 	class FrameConverter
 	{
@@ -230,7 +236,7 @@ namespace MBMedia
 
 		bool m_DecodeStreamFinished = false;
 		bool m_Flushing = false;
-		uint64_t m_CurrentPts = -1;
+		//uint64_t m_CurrentPts = -1;
 		StreamFrame p_GetDecodedFrame();
 		FrameConverter m_FrameConverter;
 	public:
@@ -300,8 +306,11 @@ namespace MBMedia
 		std::string m_ProbedData = "";
 		size_t m_ReadProbeData = 0;
 		bool m_FileEnded = false;
+
+		bool m_IsValid = true;
 	public:
-		size_t NumberOfStreams() { return(m_InputStreams.size()); }
+		size_t NumberOfStreams() { if (!m_IsValid) { return(-1); }; return(m_InputStreams.size()); }
+		bool StreamInfoAvailable();
 		StreamInfo const& GetStreamInfo(size_t StreamIndex);
 		StreamPacket GetNextPacket(size_t* StreamIndex);
 		//bool Finished() const;

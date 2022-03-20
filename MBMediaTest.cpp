@@ -56,6 +56,7 @@ int main()
 			AudioDecoder.InsertPacket(CurrentPacket);
 		}
 		MBMedia::StreamFrame NewAudioFrame = AudioDecoder.GetNextFrame();
+		NewAudioFrame.SetDuration(NewAudioFrame.GetDuration());
 		if (NewAudioFrame.GetMediaType() == MBMedia::MediaType::Null && !DecoderFlushed)
 		{
 			continue;

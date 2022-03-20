@@ -333,15 +333,29 @@ namespace MBMedia
 	{
 		AVFormatContext* InputFormatContext;
 		InputFormatContext = avformat_alloc_context();
+		if (InputFormatContext == nullptr)
+		{
+			m_IsValid = false;
+			return;
+		}
+		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
 		//DEBUG F�R png
 		InputFormatContext->max_analyze_duration = 100000000;
 		InputFormatContext->probesize = 100000000;
 		//
 
-		FFMPEGCall(avformat_open_input(&InputFormatContext, InputFile.c_str(), NULL, NULL));
+		int Result = FFMPEGCall(avformat_open_input(&InputFormatContext, InputFile.c_str(), NULL, NULL));
+		if (Result < 0)
+		{
+			m_IsValid = false;
+			return;
+		}
 		//l�sar in data om sj�lva datastreamsen
-		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
-		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
+		Result = FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		if (Result < 0)
+		{
+			m_IsValid = false;
+		}
 		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
 		{
 			m_InputStreams.push_back(StreamInfo(m_InternalData, i));//hacky af, sparar hela decode contexten eftersom free_stream inte �r en del av en public header
@@ -401,23 +415,41 @@ namespace MBMedia
 	{
 		AVFormatContext* InputFormatContext;
 		InputFormatContext = avformat_alloc_context();
+		if (InputFormatContext == nullptr)
+		{
+			m_IsValid = false;
+			return;
+		}
 		//avformat_new_stream
 		//InputFormatContext->pb
 		m_CostumIO = std::move(InputStream);
 		InputFormatContext->flags |= AVFMT_FLAG_CUSTOM_IO;
 		InputFormatContext->pb = avio_alloc_context((unsigned char*)av_malloc(8192), 8192, 0, this, h_ReadSearchableInputData, NULL, h_SeekSearchableInputStream);
+		if (InputFormatContext->pb == nullptr)
+		{
+			avformat_free_context(InputFormatContext);
+			m_IsValid = false;
+			return;
+		}
 		//allokerar format kontexten, information om filtyp och inneh�ll,l�ser bara headers och etc
 		//InputFormatContext->ifo
 
-		const size_t ProbeDataSize = 5000000;//lite yikes, r�tt mycket data som l�ses?
+		const size_t ProbeDataSize = 10000;//lite yikes, r�tt mycket data som l�ses?
 		//uint8_t* ProbeData[ProbeDataSize + AVPROBE_PADDING_SIZE];
 		//memset(ProbeData, 0, ProbeDataSize + AVPROBE_PADDING_SIZE);
 		m_ProbedData = std::string(ProbeDataSize, 0);
 		size_t ReadBytes = m_CostumIO->Read(m_ProbedData.data(), ProbeDataSize);
-		m_ProbedData.resize(ReadBytes);
+		if (ReadBytes == -1)
+		{
+			av_free(InputFormatContext->pb);
+			avformat_free_context(InputFormatContext);
+			m_IsValid = false;
+			return;
+		}
 		AVProbeData ProbeStruct;
+		m_ProbedData.resize(ReadBytes+ AVPROBE_PADDING_SIZE);
 		ProbeStruct.buf = (unsigned char*)m_ProbedData.data();
-		ProbeStruct.buf_size = ProbeDataSize;
+		ProbeStruct.buf_size = ReadBytes;
 		ProbeStruct.filename = "";
 		ProbeStruct.mime_type = "";
 		InputFormatContext->iformat = av_probe_input_format(&ProbeStruct, 1);
@@ -431,9 +463,29 @@ namespace MBMedia
 		//InputFormatContext->iformat =(AVInputFormat*)123123123;
 		m_ProbedData = "";//OBS efersom vi antar att streamen �r searchable, kanske inte alltid �r det?
 		m_CostumIO->SetInputPosition(0);
-		FFMPEGCall(avformat_open_input(&InputFormatContext, "", NULL, NULL));
+		int Result = FFMPEGCall(avformat_open_input(&InputFormatContext, "", NULL, NULL));
+		if(Result < 0)
+		{
+			if (InputFormatContext != nullptr)
+			{
+				av_free(InputFormatContext->pb);
+				avformat_free_context(InputFormatContext);
+			}
+			m_IsValid = false;
+			return;
+		}
 		//l�sar in data om sj�lva datastreamsen
-		FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		Result = FFMPEGCall(avformat_find_stream_info(InputFormatContext, NULL));
+		if (Result < 0)
+		{
+			if (InputFormatContext != nullptr)
+			{
+				av_free(InputFormatContext->pb);
+				avformat_free_context(InputFormatContext);
+			}
+			m_IsValid = false;
+			return;
+		}
 		m_InternalData = std::shared_ptr<void>(InputFormatContext, _FreeFormatContext);
 		for (size_t i = 0; i < InputFormatContext->nb_streams; i++)
 		{
@@ -445,20 +497,40 @@ namespace MBMedia
 		if (m_CostumIO != nullptr)
 		{
 			AVFormatContext* FormatContext = (AVFormatContext*)m_InternalData.get();
-			av_free(FormatContext->pb->buffer);
+			if (FormatContext != nullptr)
+			{
+				av_free(FormatContext->pb->buffer);
+			}
 		}
+	}
+	bool ContainerDemuxer::StreamInfoAvailable()
+	{
+		//TODO kan existera containrar som inte har stream info men fortfarande är valid, temporär implementering
+		return(m_IsValid);
 	}
 	StreamInfo const& ContainerDemuxer::GetStreamInfo(size_t StreamIndex)
 	{
+		if (!m_IsValid)
+		{
+			throw std::runtime_error("Stream info not loaded");
+		}
 		return(m_InputStreams[StreamIndex]);
 	}
 	void ContainerDemuxer::SeekPosition(size_t StreamIndexToSearch, int64_t StreamTimestampPosition)
 	{
+		if(!m_IsValid)
+		{
+			return;
+		}
 		AVFormatContext* InputContext = (AVFormatContext*)m_InternalData.get();
 		int Result = FFMPEGCall(av_seek_frame(InputContext, StreamIndexToSearch, StreamTimestampPosition, AVSEEK_FLAG_BACKWARD));
 	}
 	StreamPacket ContainerDemuxer::GetNextPacket(size_t* StreamIndex)
 	{
+		if (!m_IsValid)
+		{
+			return(StreamPacket());
+		}
 		AVPacket* NewPacket = av_packet_alloc();
 		AVFormatContext* InputContext = (AVFormatContext*)m_InternalData.get();
 		int ReadResponse = av_read_frame(InputContext, NewPacket);
@@ -612,10 +684,21 @@ namespace MBMedia
 		const AVFrame* FFMPEGFrame = (const AVFrame*)m_InternalData.get();
 		return(FFMPEGFrame->pts);
 	}
+	void StreamFrame::SetPresentationTime(int64_t NewTimestamp)
+	{
+		AVFrame* FFMPEGFrame = (AVFrame*)m_InternalData.get();
+		FFMPEGFrame->pts = NewTimestamp;
+		//return(FFMPEGFrame->pts);
+	}
 	int64_t StreamFrame::GetDuration() const
 	{
 		const AVFrame* FFMPEGFrame = (const AVFrame*)m_InternalData.get();
 		return(FFMPEGFrame->pkt_duration);
+	}
+	void StreamFrame::SetDuration(int64_t NewDuration)
+	{
+		AVFrame* FFMPEGFrame = (AVFrame*)m_InternalData.get();
+		FFMPEGFrame->pkt_duration = NewDuration;
 	}
 	AudioParameters StreamFrame::GetAudioParameters() const
 	{

@@ -1,8 +1,27 @@
 #include "MBMedia.h"
 #include "MBAudioUtility.h"
 #include <assert.h>
+#include <stdexcept>
+
+
+#include "MBMediaInternals.h"
 namespace MBMedia
 {
+	void SetLogLevel(LogLevel NewLevel)
+	{
+		if (NewLevel == LogLevel::None)
+		{
+			av_log_set_level(AV_LOG_QUIET);
+		}
+		else if (NewLevel == LogLevel::All)
+		{
+			//av_
+		}
+		else
+		{
+			throw std::runtime_error("Invalid log level");
+		}
+	}
 	void Transcode(std::string const& InputFile, std::string const& OutputFile, Codec NewAudioCodec, Codec NewVideoCodec)
 	{
 		//ContainerDemuxer InputData(InputFile);
