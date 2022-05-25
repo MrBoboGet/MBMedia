@@ -507,6 +507,7 @@ namespace MBMedia
 	AudioInputConverter::AudioInputConverter(std::unique_ptr<AudioStream> StreamToConvert, AudioParameters const& NewParameters)
 		: m_InternalConverter(NewParameters)
 	{
+		m_OutputParameters = NewParameters;
 		m_InternalStream = std::move(StreamToConvert);
 		m_InternalConverter.InitializeInputParameters(m_InternalStream->GetAudioParameters());
 	}

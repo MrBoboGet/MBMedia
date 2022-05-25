@@ -234,6 +234,8 @@ namespace MBMedia
 		TimeBase m_CodecTimebase;
 		TimeBase m_StreamTimebase;
 
+		bool m_Valid = true;
+
 		bool m_DecodeStreamFinished = false;
 		bool m_Flushing = false;
 		//uint64_t m_CurrentPts = -1;
@@ -252,6 +254,8 @@ namespace MBMedia
 		StreamDecoder(StreamDecoder const&) = delete;
 		StreamDecoder(StreamDecoder&&) = default;
 		StreamDecoder& operator=(StreamDecoder&&) = default;
+
+		bool IsValid() const { return(m_Valid); };
 
 		MediaType GetType() const { return(m_Type); };
 		StreamDecoder(StreamInfo const& StreamToDecode);//implicit antagande h�r, att decoda en stream kan g�ras "korrekt", att omvandla eller omtolka datan b�r g�ras fr�n framesen vi f�r efter

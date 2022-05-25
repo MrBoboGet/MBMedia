@@ -651,6 +651,7 @@ namespace MBMedia
 			//}
 		}
 		av_frame_free(&Frame);
+		//std::cout << "Test" << std::endl;
 	}
 	//StreamFrame
 	StreamFrame::StreamFrame()
@@ -749,6 +750,10 @@ namespace MBMedia
 	}
 	AudioDecodeInfo StreamDecoder::GetAudioDecodeInfo() const
 	{
+		if (m_Valid == false)
+		{
+			return(AudioDecodeInfo());
+		}
 		AudioDecodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
 		ReturnValue = h_GetAudioDecodeInfo(CodecContext);
@@ -756,6 +761,10 @@ namespace MBMedia
 	}
 	VideoDecodeInfo StreamDecoder::GetVideoDecodeInfo() const
 	{
+		if (m_Valid == false)
+		{
+			return(VideoDecodeInfo());
+		}
 		VideoDecodeInfo ReturnValue;
 		const AVCodecContext* CodecContext = (const AVCodecContext*)m_InternalData.get();
 		ReturnValue = h_GetVideoDecodeInfo(CodecContext);
@@ -766,10 +775,33 @@ namespace MBMedia
 		AVFormatContext* ContainerFormat = (AVFormatContext*)StreamToDecode.m_InternalData.get();
 		AVCodecParameters* NewInputCodecParamters = ContainerFormat->streams[StreamToDecode.m_StreamIndex]->codecpar;
 		const AVCodec* NewInputCodec = avcodec_find_decoder(NewInputCodecParamters->codec_id);
+		if (NewInputCodec == nullptr)
+		{
+			m_Valid = false;
+			return;
+		}
 		AVCodecContext* NewCodexContext = avcodec_alloc_context3(NewInputCodec);
-		FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
+		int Result = FFMPEGCall(avcodec_parameters_to_context(NewCodexContext, NewInputCodecParamters));
+		if (Result < 0 || NewCodexContext == nullptr)
+		{
+			m_Valid = false;
+			if (NewCodexContext != nullptr)
+			{
+				avcodec_free_context(&NewCodexContext);
+			}
+			return;
+		}
 		//sedan m�ste vi �ppna den, vet inte riktigt varf�r, initializerar den kanske?
-		FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
+		Result = FFMPEGCall(avcodec_open2(NewCodexContext, NewInputCodec, NULL));
+		if (Result < 0 || NewCodexContext == nullptr)
+		{
+			m_Valid = false;
+			if (NewCodexContext != nullptr)
+			{
+				avcodec_free_context(&NewCodexContext);
+			}
+			return;
+		}
 		m_InternalData = std::shared_ptr<void>(NewCodexContext, _FreeCodecContext);
 		m_Type = h_FFMPEGMediaTypeToMBMediaType(NewInputCodec->type);
 		if (m_Type == MediaType::Audio)
@@ -820,6 +852,10 @@ namespace MBMedia
 	}
 	StreamFrame StreamDecoder::GetNextFrame()
 	{
+		if (!m_Valid)
+		{
+			return(StreamFrame());
+		}
 		StreamFrame ReturnValue = p_GetDecodedFrame();
 		bool FrameConverted = false;
 		if (ReturnValue.GetMediaType() != MediaType::Null && m_FrameConverter.IsInitialised())
@@ -837,7 +873,7 @@ namespace MBMedia
 	}
 	void StreamDecoder::Flush()
 	{
-		if (m_Flushing)
+		if (m_Flushing || !m_Valid)
 		{
 			return;
 		}
@@ -851,8 +887,16 @@ namespace MBMedia
 	}
 	void StreamDecoder::Reset()
 	{
+		if (!m_Valid)
+		{
+			return;
+		}
 		AVCodecContext* CodecContext = (AVCodecContext*)m_InternalData.get();
 		avcodec_flush_buffers(CodecContext);
+		//
+		m_DecodeStreamFinished = false;
+		m_Flushing = false;
+		//
 		if (m_FrameConverter.IsInitialised())
 		{
 			m_FrameConverter.Reset();
